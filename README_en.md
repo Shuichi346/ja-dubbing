@@ -1,3 +1,12 @@
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:center"><a href="README_en.md">English</a></th>
+      <th style="text-align:center"><a href="README.md">日本語</a></th>
+    </tr>
+  </thead>
+</table>
+
 # ja-dubbing
 
 A tool that converts English videos into Japanese dubbing videos while preserving the original speaker's voice characteristics.
