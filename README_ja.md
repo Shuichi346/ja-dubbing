@@ -1,3 +1,12 @@
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:center"><a href="README_en.md">English</a></th>
+      <th style="text-align:center">日本語</th>
+    </tr>
+  </thead>
+</table>
+
 # ja-dubbing
 
 英語動画を、元話者の声色を維持した日本語吹き替え動画に変換するツール。
