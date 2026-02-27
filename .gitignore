@@ -1,0 +1,12 @@
+.env
+temp/
+input_videos/*
+__pycache__/
+*.pyc
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+MioTTS-Inference/
+start_servers.sh
