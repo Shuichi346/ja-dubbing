@@ -3,13 +3,18 @@
 """
 plamo-translate-cli (MCP) による翻訳処理。
 サーバーモードの plamo-translate に MCP クライアントで接続して翻訳する。
-イベントループを使い回し、セグメント間のオーバーヘッドを抑制する。
+
+推論暴走対策:
+  - 翻訳を別プロセスで実行し、タイムアウト時はプロセスごと強制終了する
+  - PLAMO_TRANSLATE_CLI_REPETITION_PENALTY 環境変数で繰り返し抑制
+  - タイムアウト後にサーバーヘルスチェックを行い、復旧を待つ
 """
 
 from __future__ import annotations
 
-import asyncio
 import gc
+import multiprocessing
+import os
 import re
 import time
 from collections import Counter
@@ -34,6 +39,18 @@ from ja_dubbing.utils import PipelineError, print_step
 
 class PlamoTranslateError(Exception):
     """plamo-translate翻訳エラー。"""
+
+
+# =========================================================
+# 推論暴走抑制の環境変数
+# =========================================================
+
+_REPETITION_PENALTY_ENV = "PLAMO_TRANSLATE_CLI_REPETITION_PENALTY"
+_REPETITION_CONTEXT_SIZE_ENV = "PLAMO_TRANSLATE_CLI_REPETITION_CONTEXT_SIZE"
+
+# タイムアウト後のサーバー復旧待機（秒）
+_SERVER_RECOVERY_WAIT_SEC = 5.0
+_SERVER_RECOVERY_MAX_WAIT_SEC = 60.0
 
 
 # =========================================================
@@ -66,23 +83,19 @@ def _is_repetitive_input(text_en: str) -> bool:
     if not t:
         return True
 
-    # 引用符で囲まれたフレーズを抽出
     phrases = re.findall(r'"([^"]+)"', t)
     if not phrases:
-        # 引用符がない場合は文単位で分割
         phrases = re.split(r"(?<=[\.\!\?])\s+", t)
         phrases = [p.strip() for p in phrases if p.strip()]
 
     if len(phrases) <= 2:
         return False
 
-    # ユニーク率が閾値未満なら繰り返しとみなす
     unique_phrases = set(p.strip().lower() for p in phrases)
     unique_ratio = len(unique_phrases) / len(phrases)
     if unique_ratio < INPUT_UNIQUE_RATIO_THRESHOLD:
         return True
 
-    # 同一フレーズがN回以上出現しているかチェック
     counter = Counter(p.strip().lower() for p in phrases)
     most_common_count = counter.most_common(1)[0][1]
     if most_common_count >= INPUT_REPEAT_THRESHOLD:
@@ -92,77 +105,110 @@ def _is_repetitive_input(text_en: str) -> bool:
 
 
 # =========================================================
-# MCP非同期翻訳
+# 別プロセスでの翻訳実行（推論暴走対策の核心）
 # =========================================================
 
 
-async def _translate_async(text: str) -> str:
-    """MCPクライアント経由で非同期翻訳を実行する。"""
+def _translate_in_subprocess(text: str, result_queue: multiprocessing.Queue) -> None:
+    """
+    別プロセスで翻訳を実行する。
+    プロセス内で asyncio イベントループを新規作成するため、
+    タイムアウト時にプロセスを kill すればリソースが完全にクリーンアップされる。
+    """
+    import asyncio
+
+    async def _run() -> str:
+        try:
+            from plamo_translate.clients.translate import MCPClient
+        except ImportError:
+            return "__IMPORT_ERROR__"
+
+        client = MCPClient(stream=False)
+        messages = [
+            {"role": "user", "content": f"input lang=English\n{text}"},
+            {"role": "user", "content": "output lang=Japanese\n"},
+        ]
+        result_parts: list[str] = []
+        async for chunk in client.translate(messages):
+            result_parts.append(chunk)
+        return "".join(result_parts).strip()
+
     try:
-        from plamo_translate.clients.translate import MCPClient
-    except ImportError as exc:
+        result = asyncio.run(_run())
+        result_queue.put(("ok", result))
+    except Exception as exc:
+        result_queue.put(("error", str(exc)))
+
+
+def _translate_with_process_isolation(text: str, timeout_sec: float) -> str:
+    """
+    翻訳を別プロセスで実行し、タイムアウト時はプロセスごと強制終了する。
+    MCPセッションのリーク問題を完全に回避する。
+    """
+    ctx = multiprocessing.get_context("spawn")
+    result_queue = ctx.Queue()
+    proc = ctx.Process(
+        target=_translate_in_subprocess,
+        args=(text, result_queue),
+        daemon=True,
+    )
+    proc.start()
+    proc.join(timeout=timeout_sec)
+
+    if proc.is_alive():
+        proc.kill()
+        proc.join(timeout=5)
+        raise PlamoTranslateError(
+            f"翻訳タイムアウト（{timeout_sec:.0f}秒）: "
+            f"テキスト先頭='{text[:80]}...'"
+        )
+
+    if result_queue.empty():
+        exit_code = proc.exitcode
+        raise PlamoTranslateError(
+            f"翻訳プロセスが結果を返さずに終了しました（exit_code={exit_code}）。"
+        )
+
+    status, value = result_queue.get_nowait()
+    if status == "error":
+        raise PlamoTranslateError(f"翻訳エラー: {value}")
+    if value == "__IMPORT_ERROR__":
         raise PipelineError(
             "plamo-translate がインストールされていません。\n"
             "以下を実行してください:\n"
             "  uv pip install plamo-translate\n"
-        ) from exc
-
-    client = MCPClient(stream=False)
-    messages = [
-        {"role": "user", "content": f"input lang=English\n{text}"},
-        {"role": "user", "content": "output lang=Japanese\n"},
-    ]
-    result_parts: list[str] = []
-    try:
-        async for chunk in client.translate(messages):
-            result_parts.append(chunk)
-    finally:
-        # MCPClient の非同期リソースを確実にクローズする
-        if hasattr(client, "close"):
-            try:
-                await client.close()
-            except Exception:
-                pass
-        elif hasattr(client, "aclose"):
-            try:
-                await client.aclose()
-            except Exception:
-                pass
-        elif hasattr(client, "__aexit__"):
-            try:
-                await client.__aexit__(None, None, None)
-            except Exception:
-                pass
-        del client
-
-    return "".join(result_parts).strip()
-
-
-async def _translate_with_timeout(text: str) -> str:
-    """タイムアウト付きで翻訳を実行する。"""
-    try:
-        return await asyncio.wait_for(
-            _translate_async(text), timeout=TRANSLATE_TIMEOUT_SEC
-        )
-    except asyncio.TimeoutError:
-        raise PlamoTranslateError(
-            f"翻訳タイムアウト（{TRANSLATE_TIMEOUT_SEC:.0f}秒）: "
-            f"テキスト先頭='{text[:80]}...'"
         )
 
+    return value
 
-def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
-    """既存のイベントループを取得するか、新規作成して返す。"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
+
+# =========================================================
+# サーバー復旧待機
+# =========================================================
+
+
+def _wait_for_server_recovery() -> None:
+    """翻訳タイムアウト後にサーバーが復旧するまで待機する。"""
+    from ja_dubbing.servers.health import check_plamo_translate_server
+
+    print_step("    plamo-translate サーバーの復旧を確認中...")
+    waited = 0.0
+    interval = _SERVER_RECOVERY_WAIT_SEC
+    while waited < _SERVER_RECOVERY_MAX_WAIT_SEC:
+        if check_plamo_translate_server():
+            print_step("    plamo-translate サーバー復旧確認")
+            return
+        time.sleep(interval)
+        waited += interval
+        print_step(
+            f"    サーバー復旧待機中... "
+            f"({waited:.0f}/{_SERVER_RECOVERY_MAX_WAIT_SEC:.0f}秒)"
+        )
+
+    print_step(
+        "    警告: plamo-translate サーバーが復旧しません。"
+        "翻訳を続行しますが、失敗する可能性があります。"
+    )
 
 
 # =========================================================
@@ -170,13 +216,20 @@ def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
 # =========================================================
 
 
+def _setup_repetition_penalty_env() -> None:
+    """推論暴走抑制のための環境変数を設定する（未設定の場合のみ）。"""
+    if os.environ.get(_REPETITION_PENALTY_ENV) is None:
+        os.environ[_REPETITION_PENALTY_ENV] = "1.2"
+    if os.environ.get(_REPETITION_CONTEXT_SIZE_ENV) is None:
+        os.environ[_REPETITION_CONTEXT_SIZE_ENV] = "200"
+
+
 class PlamoTranslateClient:
     """plamo-translate-cli MCPクライアントラッパー。"""
 
     def __init__(self) -> None:
-        self._loop = _get_or_create_event_loop()
+        _setup_repetition_penalty_env()
         self._call_count = 0
-        # GCを実行する翻訳回数の間隔
         self._gc_interval = 50
 
     def translate(
@@ -189,14 +242,25 @@ class PlamoTranslateClient:
         last_err: Optional[Exception] = None
         for attempt in range(1, retries + 1):
             try:
-                result = self._loop.run_until_complete(
-                    _translate_with_timeout(text)
+                result = _translate_with_process_isolation(
+                    text, TRANSLATE_TIMEOUT_SEC
                 )
                 self._call_count += 1
-                # 一定回数ごとにGCを実行してメモリ蓄積を防ぐ
                 if self._call_count % self._gc_interval == 0:
                     gc.collect()
                 return result, "stop"
+            except PlamoTranslateError as exc:
+                last_err = exc
+                is_timeout = "タイムアウト" in str(exc)
+                if attempt < retries:
+                    if is_timeout:
+                        _wait_for_server_recovery()
+                    wait_sec = retry_backoff_sec * attempt
+                    print_step(
+                        f"    翻訳リトライ {attempt}/{retries}: "
+                        f"{wait_sec:.1f}秒待機... ({exc})"
+                    )
+                    time.sleep(wait_sec)
             except Exception as exc:
                 last_err = exc
                 if attempt < retries:
@@ -226,7 +290,6 @@ def translate_segment_safely(client: PlamoTranslateClient, text_en: str) -> str:
     if not t:
         return ""
 
-    # 翻訳「入力」の繰り返し検出: サーバーハングを未然に防ぐ
     if _is_repetitive_input(t):
         print_step("    繰り返し入力を検出 → スキップ")
         return "（繰り返し音声）"
@@ -238,7 +301,6 @@ def translate_segment_safely(client: PlamoTranslateClient, text_en: str) -> str:
             return "翻訳エラー"
         return ja
 
-    # 長いテキストは文単位で分割して翻訳
     parts = re.split(r"(?<=[\.\!\?])\s+", t)
     outs: list[str] = []
     for p in parts:
@@ -287,7 +349,9 @@ def translate_segments_resumable(
                 segments[segno - 1] = replace(seg, text_ja="翻訳エラー")
                 save_segments_json_atomic(segments, seg_json_enja)
                 progress.set_step("translate_done", False)
-                progress.set_artifact("segments_en_ja_json", str(seg_json_enja))
+                progress.set_artifact(
+                    "segments_en_ja_json", str(seg_json_enja)
+                )
                 progress.save()
             continue
 

@@ -6,6 +6,7 @@ CLIエントリーポイント。
 
 from __future__ import annotations
 
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -46,6 +47,12 @@ def list_videos(folder: Path) -> list[Path]:
 
 def main() -> int:
     """メインエントリーポイント。"""
+    # macOS + MLX 環境で multiprocessing を安全に使うため spawn を設定する
+    try:
+        multiprocessing.set_start_method("spawn", force=False)
+    except RuntimeError:
+        pass
+
     if "--generate-script" in sys.argv:
         script_path = Path("start_servers.sh")
         generate_start_script(script_path)
@@ -76,7 +83,6 @@ def main() -> int:
                 print_step(f"エラー: {v}\n  {exc}")
                 failed.append(v)
             finally:
-                # 動画間でメモリを強制解放する
                 del ref_cache
                 force_memory_cleanup()
                 print_step(f"[{idx}/{len(videos)}] メモリクリーンアップ完了")
