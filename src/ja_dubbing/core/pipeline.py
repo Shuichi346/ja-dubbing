@@ -73,6 +73,13 @@ def _get_tts_engine() -> str:
     return TTS_ENGINE.strip().lower()
 
 
+def _needs_speaker_diarization(tts_engine: str) -> bool:
+    """話者分離が必要かどうかを判定する。"""
+    # Kokoro はボイスクローン非対応で全セグメントを同一音声で読み上げるため、
+    # 話者分離は不要
+    return tts_engine != "kokoro"
+
+
 def process_one_video(
     video_path: Path,
     client: PlamoTranslateClient,
@@ -82,6 +89,7 @@ def process_one_video(
     print_step(f"=== 開始: {video_path} ===")
 
     tts_engine = _get_tts_engine()
+    need_diarization = _needs_speaker_diarization(tts_engine)
 
     out_path = video_path.with_name(video_path.stem + OUTPUT_SUFFIX)
     if out_path.exists():
@@ -107,6 +115,8 @@ def process_one_video(
     asr_engine = get_asr_engine()
     print_step(f"ASR エンジン: {asr_engine}")
     print_step(f"TTS エンジン: {tts_engine}")
+    if not need_diarization:
+        print_step("話者分離: 不要（Kokoro TTS はクローン非対応のため）")
 
     # ===== 0. 動画尺 =====
     print_step("0. 動画尺を取得(ffprobe)")
@@ -135,7 +145,7 @@ def process_one_video(
 
     # ===== 2-5. 文字起こし〜セグメント加工 =====
     if progress.step("asr_done") and seg_json_en.exists():
-        print_step("2-5. ASR+話者分離: 既に完了（segments_en.json から再開）")
+        print_step("2-5. ASR+セグメント加工: 既に完了（segments_en.json から再開）")
         segments_en = load_segments_json(seg_json_en)
 
         if not srt_en_path.exists():
@@ -162,19 +172,21 @@ def process_one_video(
             progress.set_artifact("asr_srt_en", str(srt_en_path))
             progress.save()
 
-            print_step("3. 話者分離: VibeVoice-ASR 内蔵のため省略")
-            print_step("4. 話者ID割り当て: VibeVoice-ASR 内蔵のため省略")
+            if need_diarization:
+                print_step("3. 話者分離: VibeVoice-ASR 内蔵のため省略")
+                print_step("4. 話者ID割り当て: VibeVoice-ASR 内蔵のため省略")
+            else:
+                print_step("3. 話者分離: Kokoro TTS のため省略")
+                print_step("4. 話者ID割り当て: Kokoro TTS のため省略")
+                # Kokoro の場合は話者IDを無視するが、VibeVoice の出力をそのまま使う
+                # （後続のセグメント結合で speaker_id が同一かどうかの判定に影響するが、
+                #  Kokoro では全セグメント同一音声なので問題ない）
 
             segments_with_speaker = segments_raw
         else:
             from ja_dubbing.asr.whisper import (
                 release_whisper_model,
                 whisper_transcribe,
-            )
-            from ja_dubbing.diarization.alignment import assign_speakers
-            from ja_dubbing.diarization.speaker import (
-                release_pipeline,
-                run_diarization,
             )
 
             print_step("2. whisper.cpp CLIで文字起こし")
@@ -189,22 +201,52 @@ def process_one_video(
             progress.set_artifact("asr_srt_en", str(srt_en_path))
             progress.save()
 
-            # 3. 話者分離
-            print_step("3. pyannote.audio で話者分離")
-            diarization = run_diarization(wav_whisper)
+            if need_diarization:
+                # MioTTS: 話者分離が必要
+                from ja_dubbing.diarization.alignment import assign_speakers
+                from ja_dubbing.diarization.speaker import (
+                    release_pipeline,
+                    run_diarization,
+                )
 
-            progress.set_step("diarization_done", True)
-            progress.save()
+                # 3. 話者分離
+                print_step("3. pyannote.audio で話者分離")
+                diarization = run_diarization(wav_whisper)
 
-            # 4. 話者ID割り当て
-            print_step("4. Whisperセグメントに話者ID割り当て")
-            segments_with_speaker = assign_speakers(segments_raw, diarization)
-            speaker_ids = set(s.speaker_id for s in segments_with_speaker)
-            print_step(f"   話者数: {len(speaker_ids)}, ID: {sorted(speaker_ids)}")
+                progress.set_step("diarization_done", True)
+                progress.save()
 
-            # pyannote パイプラインとtorchメモリを解放
-            release_pipeline()
-            force_memory_cleanup()
+                # 4. 話者ID割り当て
+                print_step("4. Whisperセグメントに話者ID割り当て")
+                segments_with_speaker = assign_speakers(segments_raw, diarization)
+                speaker_ids = set(s.speaker_id for s in segments_with_speaker)
+                print_step(f"   話者数: {len(speaker_ids)}, ID: {sorted(speaker_ids)}")
+
+                # pyannote パイプラインとtorchメモリを解放
+                release_pipeline()
+                force_memory_cleanup()
+            else:
+                # Kokoro: 話者分離をスキップし、全セグメントに統一話者IDを設定
+                print_step("3. 話者分離: Kokoro TTS のため省略（pyannote 不使用）")
+                print_step("4. 話者ID割り当て: Kokoro TTS のため省略（統一話者ID）")
+
+                from ja_dubbing.core.models import Segment
+
+                segments_with_speaker = [
+                    Segment(
+                        idx=s.idx,
+                        start=s.start,
+                        end=s.end,
+                        text_en=s.text_en,
+                        text_ja=s.text_ja,
+                        speaker_id="KOKORO",
+                    )
+                    for s in segments_raw
+                ]
+                diarization = None
+
+                progress.set_step("diarization_done", True)
+                progress.save()
 
         # 5. セグメント加工（結合 → spaCy文分割 → 翻訳ユニット結合）
         print_step(

@@ -78,7 +78,7 @@ def preflight_server_checks() -> None:
 
     if tts_engine == "kokoro":
         # Kokoro はプロセス内で直接推論するためサーバー不要
-        print_step("  TTS エンジン: Kokoro（サーバー不要）")
+        print_step("  TTS エンジン: Kokoro（サーバー不要・話者分離不要）")
         return
 
     # MioTTS の場合はサーバーチェック
@@ -113,6 +113,7 @@ def generate_start_script(output_path: Path) -> None:
 # === ja-dubbing サーバー起動スクリプト（Kokoro TTSモード） ===
 # .env の設定値に基づいて自動生成されたスクリプトです。
 # Kokoro TTS はプロセス内で動作するため、MioTTS サーバーは不要です。
+# 話者分離（pyannote.audio）も不要です。HuggingFace トークンは必要ありません。
 
 echo "=== ja-dubbing サーバー起動（Kokoro TTSモード） ==="
 
@@ -157,6 +158,7 @@ echo ""
 echo "=== サーバー起動完了（Kokoro TTSモード） ==="
 echo "  plamo-translate:  PID=$PLAMO_PID (MLX {PLAMO_TRANSLATE_PRECISION})"
 echo "  MioTTS:           不要（Kokoro TTS 使用）"
+echo "  pyannote:         不要（話者分離なし）"
 echo ""
 echo "停止するには: Ctrl+C"
 wait
