@@ -115,6 +115,12 @@ PLAMO_TRANSLATE_RETRIES = _env_int("PLAMO_TRANSLATE_RETRIES", 3)
 PLAMO_TRANSLATE_RETRY_BACKOFF_SEC = _env_float("PLAMO_TRANSLATE_RETRY_BACKOFF_SEC", 1.5)
 
 # =========================
+# TTSエンジン共通
+# =========================
+
+TTS_ENGINE = _env("TTS_ENGINE", "miotts")  # "miotts" or "kokoro"
+
+# =========================
 # MioTTS-Inference
 # =========================
 
@@ -132,6 +138,15 @@ MIOTTS_LLM_MODEL = _env(
 MIOTTS_DEVICE = _env("MIOTTS_DEVICE", "mps")
 MIOTTS_CODEC_MODEL = _env("MIOTTS_CODEC_MODEL", "Aratako/MioCodec-25Hz-44.1kHz-v2")
 MIOTTS_INFERENCE_DIR = _env("MIOTTS_INFERENCE_DIR", "./MioTTS-Inference")
+
+# =========================
+# Kokoro TTS
+# =========================
+
+KOKORO_MODEL = _env("KOKORO_MODEL", "kokoro")
+KOKORO_VOICE = _env("KOKORO_VOICE", "jf_alpha")
+KOKORO_HTTP_TIMEOUT = _env_float("KOKORO_HTTP_TIMEOUT", 300.0)
+KOKORO_SPEED = _env_float("KOKORO_SPEED", 1.0)
 
 # =========================
 # 音声設定

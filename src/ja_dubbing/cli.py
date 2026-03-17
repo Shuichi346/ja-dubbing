@@ -10,7 +10,7 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-from ja_dubbing.config import KEEP_TEMP, TEMP_ROOT, VIDEO_EXTS, VIDEO_FOLDER
+from ja_dubbing.config import KEEP_TEMP, TEMP_ROOT, TTS_ENGINE, VIDEO_EXTS, VIDEO_FOLDER
 from ja_dubbing.core.pipeline import process_one_video
 from ja_dubbing.segments.spacy_split import initialize_spacy
 from ja_dubbing.servers.health import generate_start_script, preflight_server_checks
@@ -33,6 +33,11 @@ def preflight_checks() -> None:
     if not VIDEO_FOLDER.exists():
         raise PipelineError(f"VIDEO_FOLDER が存在しません: {VIDEO_FOLDER}")
     preflight_server_checks()
+
+    # Kokoro TTS 使用時は unidic 辞書の存在を確認する
+    if TTS_ENGINE.strip().lower() == "kokoro":
+        from ja_dubbing.tts.kokoro_tts import ensure_unidic_downloaded
+        ensure_unidic_downloaded()
 
 
 def list_videos(folder: Path) -> list[Path]:

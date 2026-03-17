@@ -3,6 +3,7 @@
 """
 メイン処理フロー。
 1つの動画を英語→日本語吹き替え動画に変換する。
+TTS エンジンとして MioTTS（話者クローン対応）と Kokoro（高速・クローン非対応）を選択可能。
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from ja_dubbing.config import (
     SPACY_UNIT_MAX_SENTENCES,
     SPACY_UNIT_MERGE_MAX_CHARS,
     SPACY_UNIT_MERGE_MAX_GAP_SEC,
+    TTS_ENGINE,
 )
 from ja_dubbing.core.models import TtsMeta
 from ja_dubbing.core.progress import ProgressStore
@@ -53,7 +55,6 @@ from ja_dubbing.translation.plamo import (
     translate_segments_resumable,
 )
 from ja_dubbing.tts.miotts import (
-    generate_segment_tts,
     load_tts_meta,
     save_tts_meta_atomic,
 )
@@ -67,6 +68,11 @@ from ja_dubbing.utils import (
 )
 
 
+def _get_tts_engine() -> str:
+    """現在選択されている TTS エンジン名を返す。"""
+    return TTS_ENGINE.strip().lower()
+
+
 def process_one_video(
     video_path: Path,
     client: PlamoTranslateClient,
@@ -74,6 +80,8 @@ def process_one_video(
 ) -> None:
     """1つの動画を処理する。"""
     print_step(f"=== 開始: {video_path} ===")
+
+    tts_engine = _get_tts_engine()
 
     out_path = video_path.with_name(video_path.stem + OUTPUT_SUFFIX)
     if out_path.exists():
@@ -98,6 +106,7 @@ def process_one_video(
 
     asr_engine = get_asr_engine()
     print_step(f"ASR エンジン: {asr_engine}")
+    print_step(f"TTS エンジン: {tts_engine}")
 
     # ===== 0. 動画尺 =====
     print_step("0. 動画尺を取得(ffprobe)")
@@ -234,16 +243,19 @@ def process_one_video(
     if not segments_en:
         raise PipelineError("segments_en が空です。")
 
-    # ===== 6. 話者リファレンス音声生成 =====
-    if diarization is not None:
-        print_step("6. 話者ごとの代表リファレンス音声を抽出")
-        ref_cache.build_references(video_path, diarization)
-    else:
-        _reload_cached_references(ref_cache, segments_en)
+    # ===== 6. 話者リファレンス音声生成（MioTTS のときのみ） =====
+    if tts_engine == "miotts":
+        if diarization is not None:
+            print_step("6. 話者ごとの代表リファレンス音声を抽出")
+            ref_cache.build_references(video_path, diarization)
+        else:
+            _reload_cached_references(ref_cache, segments_en)
 
-    # ===== 6.5. セグメント単位リファレンス音声生成 =====
-    print_step("6.5. セグメント単位のリファレンス音声を抽出（感情・テンポ対応）")
-    ref_cache.build_segment_references(video_path, segments_en)
+        # 6.5. セグメント単位リファレンス音声生成
+        print_step("6.5. セグメント単位のリファレンス音声を抽出（感情・テンポ対応）")
+        ref_cache.build_segment_references(video_path, segments_en)
+    else:
+        print_step("6. リファレンス音声抽出: Kokoro TTS（クローン非対応）のため省略")
 
     # ===== 7. 翻訳 =====
     print_step("7. plamo-translate-cli (PLaMo2 Translate MLX) で翻訳（再開対応）")
@@ -262,97 +274,18 @@ def process_one_video(
             client, segments_en, seg_json_enja, progress
         )
 
-    # ===== 8. TTS（話者クローン） =====
-    print_step("8. MioTTS で話者クローン日本語音声生成（セグメント単位リファレンス優先）")
-
-    tts_meta_path = work_dir / "tts_meta.json"
-    tts_meta = load_tts_meta(tts_meta_path)
-
-    total = len(segments_enja)
-    tts_done = 0
-    tts_failed = 0
-
-    for segno, seg in enumerate(segments_enja, start=1):
-        if seg.duration < MIN_SEGMENT_SEC:
-            tts_done += 1
-            continue
-
-        text = sanitize_text_for_tts(seg.text_ja)
-        if not text:
-            tts_done += 1
-            continue
-
-        out_audio_stub = seg_audio_dir / f"seg_{segno:05d}"
-        out_flac = out_audio_stub.with_suffix(".flac")
-
-        if segno in tts_meta and Path(tts_meta[segno].flac_path).exists():
-            tts_done += 1
-            if segno % 50 == 0:
-                progress.set_step(
-                    "tts", {"done_count": tts_done, "total": total}
-                )
-                progress.save()
-            continue
-
-        if out_flac.exists():
-            dur = ffprobe_duration_sec(out_flac)
-            if dur > 0:
-                tts_meta[segno] = TtsMeta(
-                    segno=segno,
-                    flac_path=str(out_flac),
-                    duration_sec=float(dur),
-                )
-                save_tts_meta_atomic(tts_meta_path, tts_meta)
-                tts_done += 1
-                progress.set_step(
-                    "tts", {"done_count": tts_done, "total": total}
-                )
-                progress.save()
-                continue
-
-        has_seg_ref = ref_cache.get_segment_reference_path(segno) is not None
-        ref_type = "セグメント単位" if has_seg_ref else "話者代表"
-        print_step(
-            f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
-            f"speaker={seg.speaker_id} ref={ref_type}"
-        )
-
-        try:
-            meta0 = generate_segment_tts(
-                seg, out_audio_stub, ref_cache, segno=segno
-            )
-        except Exception as exc:
-            print_step(
-                f"  TTS失敗（スキップ）: seg {segno}/{total}: {exc}"
-            )
-            meta0 = None
-            tts_failed += 1
-
-        if meta0 is None:
-            tts_done += 1
-            continue
-
-        tts_meta[segno] = TtsMeta(
-            segno=segno,
-            flac_path=meta0.flac_path,
-            duration_sec=meta0.duration_sec,
-        )
-        save_tts_meta_atomic(tts_meta_path, tts_meta)
-
-        tts_done += 1
-        progress.set_step("tts", {"done_count": tts_done, "total": total})
-        progress.set_artifact("tts_meta_json", str(tts_meta_path))
-        progress.save()
-
-    if tts_failed > 0:
-        print_step(f"  TTS失敗セグメント数: {tts_failed}/{total}")
-
-    progress.set_step("tts", {"done_count": total, "total": total})
-    progress.set_artifact("tts_meta_json", str(tts_meta_path))
-    progress.save()
+    # ===== 8. TTS =====
+    if tts_engine == "kokoro":
+        _run_tts_kokoro(segments_enja, seg_audio_dir, work_dir, progress)
+    else:
+        _run_tts_miotts(segments_enja, seg_audio_dir, work_dir, progress, ref_cache)
 
     # TTS完了後にメモリクリーンアップ
     force_memory_cleanup()
+
+    # TTSメタを読み込む（リタイム用）
+    tts_meta_path = work_dir / "tts_meta.json"
+    tts_meta = load_tts_meta(tts_meta_path)
 
     # ===== 9. リタイム =====
     print_step("9. TTSに合わせて元動画の速度を区間ごとに変更（リタイム）")
@@ -493,6 +426,201 @@ def process_one_video(
     # 動画1本の処理完了後にメモリを解放する
     force_memory_cleanup()
     print_step("メモリクリーンアップ実行済み")
+
+
+def _run_tts_kokoro(
+    segments_enja: list,
+    seg_audio_dir: Path,
+    work_dir: Path,
+    progress,
+) -> None:
+    """Kokoro TTS でセグメントの日本語音声を生成する。"""
+    from ja_dubbing.tts.kokoro_tts import generate_segment_tts_kokoro
+
+    print_step("8. Kokoro TTS で日本語音声生成（高速・クローン非対応）")
+
+    tts_meta_path = work_dir / "tts_meta.json"
+    tts_meta = load_tts_meta(tts_meta_path)
+
+    total = len(segments_enja)
+    tts_done = 0
+    tts_failed = 0
+
+    for segno, seg in enumerate(segments_enja, start=1):
+        if seg.duration < MIN_SEGMENT_SEC:
+            tts_done += 1
+            continue
+
+        text = sanitize_text_for_tts(seg.text_ja)
+        if not text:
+            tts_done += 1
+            continue
+
+        out_audio_stub = seg_audio_dir / f"seg_{segno:05d}"
+        out_flac = out_audio_stub.with_suffix(".flac")
+
+        if segno in tts_meta and Path(tts_meta[segno].flac_path).exists():
+            tts_done += 1
+            if segno % 50 == 0:
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+            continue
+
+        if out_flac.exists():
+            dur = ffprobe_duration_sec(out_flac)
+            if dur > 0:
+                tts_meta[segno] = TtsMeta(
+                    segno=segno,
+                    flac_path=str(out_flac),
+                    duration_sec=float(dur),
+                )
+                save_tts_meta_atomic(tts_meta_path, tts_meta)
+                tts_done += 1
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+                continue
+
+        print_step(
+            f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
+            f"(Kokoro)"
+        )
+
+        try:
+            meta0 = generate_segment_tts_kokoro(
+                seg, out_audio_stub, segno=segno
+            )
+        except Exception as exc:
+            print_step(
+                f"  TTS失敗（スキップ）: seg {segno}/{total}: {exc}"
+            )
+            meta0 = None
+            tts_failed += 1
+
+        if meta0 is None:
+            tts_done += 1
+            continue
+
+        tts_meta[segno] = TtsMeta(
+            segno=segno,
+            flac_path=meta0.flac_path,
+            duration_sec=meta0.duration_sec,
+        )
+        save_tts_meta_atomic(tts_meta_path, tts_meta)
+
+        tts_done += 1
+        progress.set_step("tts", {"done_count": tts_done, "total": total})
+        progress.set_artifact("tts_meta_json", str(tts_meta_path))
+        progress.save()
+
+    if tts_failed > 0:
+        print_step(f"  TTS失敗セグメント数: {tts_failed}/{total}")
+
+    progress.set_step("tts", {"done_count": total, "total": total})
+    progress.set_artifact("tts_meta_json", str(tts_meta_path))
+    progress.save()
+
+
+def _run_tts_miotts(
+    segments_enja: list,
+    seg_audio_dir: Path,
+    work_dir: Path,
+    progress,
+    ref_cache: SpeakerReferenceCache,
+) -> None:
+    """MioTTS で話者クローン日本語音声を生成する。"""
+    from ja_dubbing.tts.miotts import generate_segment_tts
+
+    print_step("8. MioTTS で話者クローン日本語音声生成（セグメント単位リファレンス優先）")
+
+    tts_meta_path = work_dir / "tts_meta.json"
+    tts_meta = load_tts_meta(tts_meta_path)
+
+    total = len(segments_enja)
+    tts_done = 0
+    tts_failed = 0
+
+    for segno, seg in enumerate(segments_enja, start=1):
+        if seg.duration < MIN_SEGMENT_SEC:
+            tts_done += 1
+            continue
+
+        text = sanitize_text_for_tts(seg.text_ja)
+        if not text:
+            tts_done += 1
+            continue
+
+        out_audio_stub = seg_audio_dir / f"seg_{segno:05d}"
+        out_flac = out_audio_stub.with_suffix(".flac")
+
+        if segno in tts_meta and Path(tts_meta[segno].flac_path).exists():
+            tts_done += 1
+            if segno % 50 == 0:
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+            continue
+
+        if out_flac.exists():
+            dur = ffprobe_duration_sec(out_flac)
+            if dur > 0:
+                tts_meta[segno] = TtsMeta(
+                    segno=segno,
+                    flac_path=str(out_flac),
+                    duration_sec=float(dur),
+                )
+                save_tts_meta_atomic(tts_meta_path, tts_meta)
+                tts_done += 1
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+                continue
+
+        has_seg_ref = ref_cache.get_segment_reference_path(segno) is not None
+        ref_type = "セグメント単位" if has_seg_ref else "話者代表"
+        print_step(
+            f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
+            f"speaker={seg.speaker_id} ref={ref_type}"
+        )
+
+        try:
+            meta0 = generate_segment_tts(
+                seg, out_audio_stub, ref_cache, segno=segno
+            )
+        except Exception as exc:
+            print_step(
+                f"  TTS失敗（スキップ）: seg {segno}/{total}: {exc}"
+            )
+            meta0 = None
+            tts_failed += 1
+
+        if meta0 is None:
+            tts_done += 1
+            continue
+
+        tts_meta[segno] = TtsMeta(
+            segno=segno,
+            flac_path=meta0.flac_path,
+            duration_sec=meta0.duration_sec,
+        )
+        save_tts_meta_atomic(tts_meta_path, tts_meta)
+
+        tts_done += 1
+        progress.set_step("tts", {"done_count": tts_done, "total": total})
+        progress.set_artifact("tts_meta_json", str(tts_meta_path))
+        progress.save()
+
+    if tts_failed > 0:
+        print_step(f"  TTS失敗セグメント数: {tts_failed}/{total}")
+
+    progress.set_step("tts", {"done_count": total, "total": total})
+    progress.set_artifact("tts_meta_json", str(tts_meta_path))
+    progress.save()
 
 
 def _reload_cached_references(

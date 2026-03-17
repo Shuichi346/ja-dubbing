@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 サーバーヘルスチェック・起動スクリプト生成。
+TTSエンジンに応じて MioTTS のチェックをスキップする。
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ja_dubbing.config import MIOTTS_API_URL
+from ja_dubbing.config import MIOTTS_API_URL, TTS_ENGINE
 from ja_dubbing.utils import PipelineError, print_step
 
 
@@ -59,6 +60,11 @@ def check_plamo_translate_server() -> bool:
         return False
 
 
+def _get_tts_engine() -> str:
+    """現在選択されている TTS エンジン名を返す。"""
+    return TTS_ENGINE.strip().lower()
+
+
 def preflight_server_checks() -> None:
     """全サーバーのヘルスチェックを実行する。"""
     if not check_plamo_translate_server():
@@ -68,6 +74,14 @@ def preflight_server_checks() -> None:
             "  uv run plamo-translate server --precision 8bit"
         )
 
+    tts_engine = _get_tts_engine()
+
+    if tts_engine == "kokoro":
+        # Kokoro はプロセス内で直接推論するためサーバー不要
+        print_step("  TTS エンジン: Kokoro（サーバー不要）")
+        return
+
+    # MioTTS の場合はサーバーチェック
     miotts_health = f"{MIOTTS_API_URL.rstrip('/')}/health"
     if not check_health(miotts_health):
         raise PipelineError(
@@ -91,7 +105,65 @@ def generate_start_script(output_path: Path) -> None:
     parsed = urlparse(MIOTTS_API_URL)
     miotts_api_port = parsed.port or 8001
 
-    script = f"""#!/bin/bash
+    tts_engine = _get_tts_engine()
+
+    if tts_engine == "kokoro":
+        # Kokoro モードでは翻訳サーバーのみ必要
+        script = f"""#!/bin/bash
+# === ja-dubbing サーバー起動スクリプト（Kokoro TTSモード） ===
+# .env の設定値に基づいて自動生成されたスクリプトです。
+# Kokoro TTS はプロセス内で動作するため、MioTTS サーバーは不要です。
+
+echo "=== ja-dubbing サーバー起動（Kokoro TTSモード） ==="
+
+PIDS=()
+
+cleanup() {{
+    echo ""
+    echo "=== 全サーバーを停止します ==="
+    for pid in "${{PIDS[@]}}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            echo "  停止: PID=$pid"
+        fi
+    done
+    wait 2>/dev/null
+    echo "=== 停止完了 ==="
+    exit 1
+}}
+
+trap cleanup INT TERM
+
+check_process() {{
+    local pid=$1
+    local name=$2
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "エラー: $name が起動に失敗しました (PID=$pid)"
+        cleanup
+    fi
+}}
+
+echo "1/1: plamo-translate-cli 翻訳サーバー起動 (MLX {PLAMO_TRANSLATE_PRECISION})"
+uv run plamo-translate server --precision {PLAMO_TRANSLATE_PRECISION} &
+PLAMO_PID=$!
+PIDS+=("$PLAMO_PID")
+
+echo "  plamo-translate 起動待機中（15秒）..."
+sleep 15
+check_process "$PLAMO_PID" "plamo-translate"
+echo "  plamo-translate サーバー起動完了"
+
+echo ""
+echo "=== サーバー起動完了（Kokoro TTSモード） ==="
+echo "  plamo-translate:  PID=$PLAMO_PID (MLX {PLAMO_TRANSLATE_PRECISION})"
+echo "  MioTTS:           不要（Kokoro TTS 使用）"
+echo ""
+echo "停止するには: Ctrl+C"
+wait
+"""
+    else:
+        # MioTTS モード（従来と同じ）
+        script = f"""#!/bin/bash
 # === ja-dubbing サーバー起動スクリプト ===
 # .env の設定値に基づいて自動生成されたスクリプトです。
 

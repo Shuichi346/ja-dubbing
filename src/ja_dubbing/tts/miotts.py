@@ -206,7 +206,7 @@ def generate_segment_tts(
     ref_cache: SpeakerReferenceCache,
     segno: int = 0,
 ) -> Optional[TtsMeta]:
-    """セグメントの話者クローン音声を生成する。"""
+    """セグメントの話者クローン音声を生成する（MioTTS）。"""
     if seg.duration < MIN_SEGMENT_SEC:
         return None
 
