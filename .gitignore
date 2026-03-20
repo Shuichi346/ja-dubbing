@@ -9,6 +9,7 @@ dist/
 build/
 .venv/
 MioTTS-Inference/
+GPT-SoVITS/
 start_servers.sh
 whisper.cpp/
 uv.lock

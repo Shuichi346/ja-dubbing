@@ -2,18 +2,23 @@
 # -*- coding: utf-8 -*-
 """
 サーバーヘルスチェック・起動スクリプト生成。
-TTSエンジンに応じて MioTTS のチェックをスキップする。
+翻訳は CAT-Translate (llama-cpp-python) でプロセス内推論するためサーバー不要。
+MioTTS / GPT-SoVITS のときのみ API サーバーチェックを行う。
 """
 
 from __future__ import annotations
 
-import time
-import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ja_dubbing.config import MIOTTS_API_URL, TTS_ENGINE
+from ja_dubbing.config import (
+    GPTSOVITS_API_URL,
+    GPTSOVITS_CONDA_ENV,
+    GPTSOVITS_DIR,
+    MIOTTS_API_URL,
+    TTS_ENGINE,
+)
 from ja_dubbing.utils import PipelineError, print_step
 
 
@@ -27,35 +32,17 @@ def check_health(url: str, timeout: float = 5.0) -> bool:
         return False
 
 
-def wait_for_server(
-    name: str,
-    url: str,
-    timeout: float = 120.0,
-    interval: float = 3.0,
-) -> None:
-    """サーバーが応答するまで待機する。"""
-    print_step(f"  {name} の応答を待機中: {url}")
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if check_health(url):
-            print_step(f"  {name} 応答確認")
-            return
-        time.sleep(interval)
-    raise PipelineError(f"{name} が {timeout}秒以内に応答しません: {url}")
-
-
-def check_plamo_translate_server() -> bool:
-    """plamo-translate-cliサーバーが起動しているか確認する。"""
+def _check_gptsovits_health() -> bool:
+    """GPT-SoVITS API サーバーの疎通を確認する（/tts エンドポイントへの空リクエストでなく、接続可能性のみ確認）。"""
+    parsed = urlparse(GPTSOVITS_API_URL)
+    import socket
     try:
-        from plamo_translate.servers.utils import update_config, verify_mcp_server_ready
-        import asyncio
-
-        config = update_config()
-        if "port" not in config:
-            return False
-        port = config["port"]
-        tools = asyncio.run(verify_mcp_server_ready(port))
-        return "plamo-translate" in tools
+        sock = socket.create_connection(
+            (parsed.hostname or "127.0.0.1", parsed.port or 9880),
+            timeout=5.0,
+        )
+        sock.close()
+        return True
     except Exception:
         return False
 
@@ -66,22 +53,30 @@ def _get_tts_engine() -> str:
 
 
 def preflight_server_checks() -> None:
-    """全サーバーのヘルスチェックを実行する。"""
-    if not check_plamo_translate_server():
-        raise PipelineError(
-            "plamo-translate-cli サーバーに接続できません。\n"
-            "  以下を別ターミナルで実行してください:\n"
-            "  uv run plamo-translate server --precision 8bit"
-        )
-
+    """TTS サーバーのヘルスチェックを実行する。"""
     tts_engine = _get_tts_engine()
 
     if tts_engine == "kokoro":
-        # Kokoro はプロセス内で直接推論するためサーバー不要
-        print_step("  TTS エンジン: Kokoro（サーバー不要・話者分離不要）")
+        print_step("  TTS エンジン: Kokoro（サーバー不要）")
         return
 
-    # MioTTS の場合はサーバーチェック
+    if tts_engine == "gptsovits":
+        if not _check_gptsovits_health():
+            parsed = urlparse(GPTSOVITS_API_URL)
+            port = parsed.port or 9880
+            raise PipelineError(
+                f"GPT-SoVITS API サーバーに接続できません: {GPTSOVITS_API_URL}\n"
+                f"以下の手順でサーバーを起動してください:\n"
+                f"  conda activate {GPTSOVITS_CONDA_ENV}\n"
+                f"  cd {GPTSOVITS_DIR}\n"
+                f"  python api_v2.py -a 127.0.0.1 -p {port}"
+                f" -c GPT_SoVITS/configs/tts_infer.yaml\n"
+                f"\nまたは: uv run ja-dubbing --generate-script で起動スクリプトを生成\n"
+            )
+        print_step(f"  GPT-SoVITS API サーバー: 接続OK ({GPTSOVITS_API_URL})")
+        return
+
+    # MioTTS の場合
     miotts_health = f"{MIOTTS_API_URL.rstrip('/')}/health"
     if not check_health(miotts_health):
         raise PipelineError(
@@ -99,7 +94,6 @@ def generate_start_script(output_path: Path) -> None:
         MIOTTS_LLM_MODEL,
         MIOTTS_LLM_PORT,
         MIOTTS_MAX_TEXT_LENGTH,
-        PLAMO_TRANSLATE_PRECISION,
     )
 
     parsed = urlparse(MIOTTS_API_URL)
@@ -108,68 +102,95 @@ def generate_start_script(output_path: Path) -> None:
     tts_engine = _get_tts_engine()
 
     if tts_engine == "kokoro":
-        # Kokoro モードでは翻訳サーバーのみ必要
-        script = f"""#!/bin/bash
+        script = """#!/bin/bash
 # === ja-dubbing サーバー起動スクリプト（Kokoro TTSモード） ===
-# .env の設定値に基づいて自動生成されたスクリプトです。
-# Kokoro TTS はプロセス内で動作するため、MioTTS サーバーは不要です。
-# 話者分離（pyannote.audio）も不要です。HuggingFace トークンは必要ありません。
+# 翻訳は CAT-Translate-7b（プロセス内推論・サーバー不要）
+# Kokoro TTS もプロセス内で動作するため、外部サーバーは不要です。
 
-echo "=== ja-dubbing サーバー起動（Kokoro TTSモード） ==="
+echo "=== ja-dubbing（Kokoro TTSモード） ==="
+echo ""
+echo "翻訳: CAT-Translate-7b（プロセス内推論・サーバー不要）"
+echo "TTS:  Kokoro TTS（プロセス内推論・サーバー不要）"
+echo ""
+echo "外部サーバーの起動は不要です。"
+echo "直接 'uv run ja-dubbing' を実行してください。"
+"""
+    elif tts_engine == "gptsovits":
+        gs_parsed = urlparse(GPTSOVITS_API_URL)
+        gs_port = gs_parsed.port or 9880
+        gs_host = gs_parsed.hostname or "127.0.0.1"
 
-PIDS=()
+        # GPT-SoVITS の絶対パスを取得（スクリプト生成時に解決）
+        gs_dir_resolved = str(Path(GPTSOVITS_DIR).resolve())
+
+        script = f"""#!/bin/bash
+# === ja-dubbing サーバー起動スクリプト（GPT-SoVITS モード） ===
+# 翻訳は CAT-Translate-7b（プロセス内推論・サーバー不要）
+# GPT-SoVITS API サーバーのみ起動します。
+# GPT-SoVITS は独立した conda 環境で動作します。
+
+echo "=== ja-dubbing サーバー起動（GPT-SoVITS V2ProPlus モード） ==="
+
+# conda 初期化
+eval "$(conda shell.bash hook)"
 
 cleanup() {{
     echo ""
-    echo "=== 全サーバーを停止します ==="
-    for pid in "${{PIDS[@]}}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null
-            echo "  停止: PID=$pid"
-        fi
-    done
+    echo "=== GPT-SoVITS サーバーを停止します ==="
+    if [ -n "$GPTSOVITS_PID" ] && kill -0 "$GPTSOVITS_PID" 2>/dev/null; then
+        kill "$GPTSOVITS_PID" 2>/dev/null
+        echo "  停止: PID=$GPTSOVITS_PID"
+    fi
     wait 2>/dev/null
     echo "=== 停止完了 ==="
-    exit 1
+    exit 0
 }}
 
 trap cleanup INT TERM
 
-check_process() {{
-    local pid=$1
-    local name=$2
-    if ! kill -0 "$pid" 2>/dev/null; then
-        echo "エラー: $name が起動に失敗しました (PID=$pid)"
-        cleanup
-    fi
+echo "1/1: GPT-SoVITS API サーバー起動（ポート {gs_port}）"
+echo "  conda 環境: {GPTSOVITS_CONDA_ENV}"
+echo "  ディレクトリ: {gs_dir_resolved}"
+
+conda activate {GPTSOVITS_CONDA_ENV}
+
+cd "{gs_dir_resolved}" || {{
+    echo "エラー: {gs_dir_resolved} が見つかりません"
+    echo "scripts/setup_gptsovits.sh を先に実行してください"
+    exit 1
 }}
 
-echo "1/1: plamo-translate-cli 翻訳サーバー起動 (MLX {PLAMO_TRANSLATE_PRECISION})"
-uv run plamo-translate server --precision {PLAMO_TRANSLATE_PRECISION} &
-PLAMO_PID=$!
-PIDS+=("$PLAMO_PID")
+python api_v2.py \\
+    -a {gs_host} \\
+    -p {gs_port} \\
+    -c GPT_SoVITS/configs/tts_infer.yaml &
+GPTSOVITS_PID=$!
 
-echo "  plamo-translate 起動待機中（15秒）..."
+echo "  GPT-SoVITS API 起動待機中（15秒）..."
 sleep 15
-check_process "$PLAMO_PID" "plamo-translate"
-echo "  plamo-translate サーバー起動完了"
+
+if ! kill -0 "$GPTSOVITS_PID" 2>/dev/null; then
+    echo "エラー: GPT-SoVITS API サーバーが起動に失敗しました"
+    exit 1
+fi
 
 echo ""
-echo "=== サーバー起動完了（Kokoro TTSモード） ==="
-echo "  plamo-translate:  PID=$PLAMO_PID (MLX {PLAMO_TRANSLATE_PRECISION})"
-echo "  MioTTS:           不要（Kokoro TTS 使用）"
-echo "  pyannote:         不要（話者分離なし）"
+echo "=== サーバー起動完了 ==="
+echo "  翻訳: CAT-Translate-7b（プロセス内推論・サーバー不要）"
+echo "  GPT-SoVITS API: PID=$GPTSOVITS_PID (ポート {gs_port})"
+echo "  モデル: V2ProPlus（ゼロショットボイスクローン）"
 echo ""
 echo "停止するには: Ctrl+C"
 wait
 """
     else:
-        # MioTTS モード（従来と同じ）
+        # MioTTS モード
         script = f"""#!/bin/bash
-# === ja-dubbing サーバー起動スクリプト ===
-# .env の設定値に基づいて自動生成されたスクリプトです。
+# === ja-dubbing サーバー起動スクリプト（MioTTS モード） ===
+# 翻訳は CAT-Translate-7b（プロセス内推論・サーバー不要）
+# MioTTS の Ollama + API サーバーのみ起動します。
 
-echo "=== ja-dubbing サーバー起動 ==="
+echo "=== ja-dubbing サーバー起動（MioTTS モード） ==="
 
 PIDS=()
 
@@ -198,17 +219,7 @@ check_process() {{
     fi
 }}
 
-echo "1/3: plamo-translate-cli 翻訳サーバー起動 (MLX {PLAMO_TRANSLATE_PRECISION})"
-uv run plamo-translate server --precision {PLAMO_TRANSLATE_PRECISION} &
-PLAMO_PID=$!
-PIDS+=("$PLAMO_PID")
-
-echo "  plamo-translate 起動待機中（15秒）..."
-sleep 15
-check_process "$PLAMO_PID" "plamo-translate"
-echo "  plamo-translate サーバー起動完了"
-
-echo "2/3: MioTTS LLMバックエンド起動 (ポート{MIOTTS_LLM_PORT})"
+echo "1/2: MioTTS LLMバックエンド起動 (ポート{MIOTTS_LLM_PORT})"
 OLLAMA_HOST=localhost:{MIOTTS_LLM_PORT} ollama serve &
 MIOTTS_LLM_PID=$!
 PIDS+=("$MIOTTS_LLM_PID")
@@ -224,7 +235,7 @@ if ! OLLAMA_HOST=localhost:{MIOTTS_LLM_PORT} ollama pull {MIOTTS_LLM_MODEL}; the
 fi
 echo "  MioTTS LLMモデル準備完了: {MIOTTS_LLM_MODEL}"
 
-echo "3/3: MioTTS APIサーバー起動 (ポート{miotts_api_port})"
+echo "2/2: MioTTS APIサーバー起動 (ポート{miotts_api_port})"
 cd {MIOTTS_INFERENCE_DIR} || {{ echo "エラー: {MIOTTS_INFERENCE_DIR} ディレクトリが見つかりません"; cleanup; }}
 uv run python run_server.py \\
     --llm-base-url http://localhost:{MIOTTS_LLM_PORT}/v1 \\
@@ -241,13 +252,13 @@ sleep 10
 check_process "$MIOTTS_API_PID" "MioTTS API"
 
 echo ""
-echo "=== 全サーバー起動完了 ==="
-echo "  plamo-translate:  PID=$PLAMO_PID (MLX {PLAMO_TRANSLATE_PRECISION})"
-echo "  MioTTS LLM:       PID=$MIOTTS_LLM_PID (ポート{MIOTTS_LLM_PORT})"
-echo "  MioTTS API:       PID=$MIOTTS_API_PID (ポート{miotts_api_port})"
+echo "=== サーバー起動完了 ==="
+echo "  翻訳: CAT-Translate-7b（プロセス内推論・サーバー不要）"
+echo "  MioTTS LLM:  PID=$MIOTTS_LLM_PID (ポート{MIOTTS_LLM_PORT})"
+echo "  MioTTS API:  PID=$MIOTTS_API_PID (ポート{miotts_api_port})"
 echo ""
 echo "停止するには: Ctrl+C"
-echo "または: pkill -f 'plamo-translate' && pkill -f 'ollama serve' && pkill -f 'run_server.py'"
+echo "または: pkill -f 'ollama serve' && pkill -f 'run_server.py'"
 wait
 """
     output_path.write_text(script, encoding="utf-8")

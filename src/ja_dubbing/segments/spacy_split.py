@@ -18,7 +18,7 @@ _SPACY_NLP = None
 
 def _get_spacy_nlp():
     """spaCyのNLPを遅延ロードする。"""
-    global _SPACY_NLP  # noqa: PLW0603
+    global _SPACY_NLP
     if _SPACY_NLP is not None:
         return _SPACY_NLP
 

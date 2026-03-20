@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
+
+import numpy as np
 
 from ja_dubbing.audio.ffmpeg import ffprobe_duration_sec
 from ja_dubbing.config import (
@@ -101,8 +103,6 @@ def kokoro_synthesize_to_wav(text_ja: str, out_wav: Path) -> bool:
 
     # Kokoro はジェネレータとして音声を返す
     # 全チャンクを結合して1つのWAVにする
-    import numpy as np
-
     audio_chunks: list = []
     try:
         generator = pipeline(
@@ -191,23 +191,3 @@ def generate_segment_tts_kokoro(
         return None
 
     return TtsMeta(segno=segno, flac_path=str(out_flac), duration_sec=float(dur))
-
-
-def release_kokoro_pipeline() -> None:
-    """Kokoro パイプラインを解放してメモリを回収する。"""
-    global _KOKORO_PIPELINE
-    if _KOKORO_PIPELINE is not None:
-        del _KOKORO_PIPELINE
-        _KOKORO_PIPELINE = None
-
-        import gc
-        gc.collect()
-
-        try:
-            import torch
-            if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
-                torch.mps.empty_cache()
-        except ImportError:
-            pass
-
-        print_step("  Kokoro TTS パイプラインを解放しました")

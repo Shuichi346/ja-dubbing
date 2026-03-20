@@ -107,18 +107,22 @@ HF_AUTH_TOKEN = _env("HF_AUTH_TOKEN", "")
 PYANNOTE_MODEL = _env("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1")
 
 # =========================
-# plamo-translate-cli (PLaMo翻訳)
+# CAT-Translate（英日翻訳）
 # =========================
 
-PLAMO_TRANSLATE_PRECISION = _env("PLAMO_TRANSLATE_PRECISION", "8bit")
-PLAMO_TRANSLATE_RETRIES = _env_int("PLAMO_TRANSLATE_RETRIES", 3)
-PLAMO_TRANSLATE_RETRY_BACKOFF_SEC = _env_float("PLAMO_TRANSLATE_RETRY_BACKOFF_SEC", 1.5)
+CAT_TRANSLATE_REPO = _env("CAT_TRANSLATE_REPO", "mradermacher/CAT-Translate-7b-GGUF")
+CAT_TRANSLATE_FILE = _env("CAT_TRANSLATE_FILE", "CAT-Translate-7b.Q8_0.gguf")
+CAT_TRANSLATE_N_GPU_LAYERS = _env_int("CAT_TRANSLATE_N_GPU_LAYERS", -1)
+CAT_TRANSLATE_N_CTX = _env_int("CAT_TRANSLATE_N_CTX", 4096)
+CAT_TRANSLATE_RETRIES = _env_int("CAT_TRANSLATE_RETRIES", 3)
+CAT_TRANSLATE_RETRY_BACKOFF_SEC = _env_float("CAT_TRANSLATE_RETRY_BACKOFF_SEC", 1.5)
+CAT_TRANSLATE_REPEAT_PENALTY = _env_float("CAT_TRANSLATE_REPEAT_PENALTY", 1.2)
 
 # =========================
 # TTSエンジン共通
 # =========================
 
-TTS_ENGINE = _env("TTS_ENGINE", "miotts")  # "miotts" or "kokoro"
+TTS_ENGINE = _env("TTS_ENGINE", "miotts")  # "miotts" or "kokoro" or "gptsovits"
 
 # =========================
 # MioTTS-Inference
@@ -145,8 +149,35 @@ MIOTTS_INFERENCE_DIR = _env("MIOTTS_INFERENCE_DIR", "./MioTTS-Inference")
 
 KOKORO_MODEL = _env("KOKORO_MODEL", "kokoro")
 KOKORO_VOICE = _env("KOKORO_VOICE", "jf_alpha")
-KOKORO_HTTP_TIMEOUT = _env_float("KOKORO_HTTP_TIMEOUT", 300.0)
 KOKORO_SPEED = _env_float("KOKORO_SPEED", 1.0)
+
+# =========================
+# GPT-SoVITS（V2ProPlus ゼロショットボイスクローン）
+# =========================
+
+GPTSOVITS_API_URL = _env("GPTSOVITS_API_URL", "http://127.0.0.1:9880")
+GPTSOVITS_HTTP_TIMEOUT = _env_float("GPTSOVITS_HTTP_TIMEOUT", 300.0)
+GPTSOVITS_TTS_RETRIES = _env_int("GPTSOVITS_TTS_RETRIES", 2)
+GPTSOVITS_DIR = _env("GPTSOVITS_DIR", "./GPT-SoVITS")
+GPTSOVITS_CONDA_ENV = _env("GPTSOVITS_CONDA_ENV", "gptsovits")
+
+# GPT-SoVITS API パラメータ
+GPTSOVITS_TEXT_LANG = _env("GPTSOVITS_TEXT_LANG", "ja")
+GPTSOVITS_PROMPT_LANG = _env("GPTSOVITS_PROMPT_LANG", "en")
+GPTSOVITS_TOP_K = _env_int("GPTSOVITS_TOP_K", 15)
+GPTSOVITS_TOP_P = _env_float("GPTSOVITS_TOP_P", 1.0)
+GPTSOVITS_TEMPERATURE = _env_float("GPTSOVITS_TEMPERATURE", 1.0)
+GPTSOVITS_TEXT_SPLIT_METHOD = _env("GPTSOVITS_TEXT_SPLIT_METHOD", "cut5")
+GPTSOVITS_BATCH_SIZE = _env_int("GPTSOVITS_BATCH_SIZE", 1)
+GPTSOVITS_SPEED_FACTOR = _env_float("GPTSOVITS_SPEED_FACTOR", 1.0)
+GPTSOVITS_MEDIA_TYPE = _env("GPTSOVITS_MEDIA_TYPE", "wav")
+GPTSOVITS_REPETITION_PENALTY = _env_float("GPTSOVITS_REPETITION_PENALTY", 1.35)
+
+# GPT-SoVITS リファレンス音声設定
+# ゼロショット参照音声: 3〜10秒（推奨5秒）
+GPTSOVITS_REFERENCE_MIN_SEC = _env_float("GPTSOVITS_REFERENCE_MIN_SEC", 3.0)
+GPTSOVITS_REFERENCE_MAX_SEC = _env_float("GPTSOVITS_REFERENCE_MAX_SEC", 10.0)
+GPTSOVITS_REFERENCE_TARGET_SEC = _env_float("GPTSOVITS_REFERENCE_TARGET_SEC", 5.0)
 
 # =========================
 # 音声設定
@@ -185,16 +216,12 @@ SPACY_MIN_WEIGHT = _env_int("SPACY_MIN_WEIGHT", 1)
 # 翻訳異常検出
 # =========================
 
-# 翻訳「出力」（日本語）の異常検出
-GLITCH_PHRASE = _env("GLITCH_PHRASE", "を徹底的に")
-GLITCH_MIN_REPEAT = _env_int("GLITCH_MIN_REPEAT", 3)
+# 翻訳「出力」（日本語）の異常検出: 同一フレーズがN回以上繰り返されていたら異常とみなす
+OUTPUT_REPEAT_THRESHOLD = _env_int("OUTPUT_REPEAT_THRESHOLD", 3)
 
 # 翻訳「入力」（英語）の繰り返し検出
 INPUT_REPEAT_THRESHOLD = _env_int("INPUT_REPEAT_THRESHOLD", 4)
 INPUT_UNIQUE_RATIO_THRESHOLD = _env_float("INPUT_UNIQUE_RATIO_THRESHOLD", 0.3)
-
-# 翻訳API1回あたりのタイムアウト（秒）
-TRANSLATE_TIMEOUT_SEC = _env_float("TRANSLATE_TIMEOUT_SEC", 120.0)
 
 # =========================
 # 音量ミックス

@@ -478,6 +478,42 @@ def _parse_vibevoice_segments(
     return segments, diarization
 
 
+def transcribe_short_audio_vibevoice(wav_path: Path) -> str:
+    """
+    短い音声ファイル（参照音声等）を VibeVoice-ASR で文字起こしする。
+    全セグメントのテキストを結合して返す。
+    失敗時は空文字列を返す。
+    """
+    if not wav_path.exists():
+        return ""
+
+    try:
+        model = _get_vibevoice_model()
+        result = _generate_standard(model, wav_path)
+    except Exception as exc:
+        print_step(f"    VibeVoice 参照音声文字起こし失敗: {exc}")
+        return ""
+
+    if isinstance(result, dict):
+        raw_segments = result.get("segments", [])
+    else:
+        raw_segments = (
+            result.segments
+            if hasattr(result, "segments") and result.segments
+            else []
+        )
+
+    texts = []
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        text = (seg.get("text", "")).strip()
+        if text and not _is_non_speech(text):
+            texts.append(text)
+
+    return " ".join(texts).strip()
+
+
 def release_vibevoice_model() -> None:
     """メモリ節約のため VibeVoice-ASR モデルを解放する。"""
     global _VIBEVOICE_MODEL

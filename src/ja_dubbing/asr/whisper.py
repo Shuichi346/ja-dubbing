@@ -24,12 +24,10 @@ from ja_dubbing.utils import PipelineError, print_step, run_cmd, which_or_raise
 
 def _resolve_whisper_cli() -> str:
     """whisper-cli バイナリのパスを解決する。"""
-    # whisper.cpp ビルドディレクトリ内のバイナリを優先
     candidate = WHISPER_CPP_DIR / "build" / "bin" / "whisper-cli"
     if candidate.exists():
         return str(candidate)
 
-    # PATH 上にあれば使用する
     import shutil
     path_bin = shutil.which("whisper-cli")
     if path_bin:
@@ -90,7 +88,6 @@ def whisper_transcribe(wav_path: Path) -> List[Segment]:
 
     n_threads = max(1, (os.cpu_count() or 8) - 2)
 
-    # JSON 出力先（whisper-cli は入力ファイル名 + .json を作成する）
     output_base = wav_path.parent / wav_path.stem
     json_path = Path(f"{output_base}.json")
 
@@ -119,7 +116,6 @@ def whisper_transcribe(wav_path: Path) -> List[Segment]:
             f"whisper-cli の JSON 出力が見つかりません: {json_path}"
         )
 
-    # JSON パース
     segments = _parse_whisper_json(json_path)
 
     if not segments:
@@ -134,13 +130,10 @@ def _parse_whisper_json(json_path: Path) -> List[Segment]:
     raw = json_path.read_text(encoding="utf-8")
     data = json.loads(raw)
 
-    # whisper.cpp の JSON 形式:
-    # { "transcription": [ { "timestamps": {"from": "HH:MM:SS,mmm", "to": "..."}, 
-    #                        "offsets": {"from": ms, "to": ms}, "text": "..." }, ... ] }
     transcription = data.get("transcription", [])
     segments: List[Segment] = []
 
-    for i, entry in enumerate(transcription):
+    for entry in transcription:
         offsets = entry.get("offsets", {})
         start_ms = int(offsets.get("from", 0))
         end_ms = int(offsets.get("to", 0))
@@ -165,6 +158,74 @@ def _parse_whisper_json(json_path: Path) -> List[Segment]:
         )
 
     return segments
+
+
+def transcribe_short_audio(wav_path: Path, language: str = "") -> str:
+    """
+    短い音声ファイル（参照音声等）を whisper.cpp で文字起こしする。
+    全セグメントのテキストを結合して返す。
+    失敗時は空文字列を返す。
+    """
+    if not wav_path.exists():
+        return ""
+
+    # 16kHz mono WAV に変換（whisper.cpp の入力要件）
+    tmp_wav = wav_path.parent / f"{wav_path.stem}_w16k.wav"
+    try:
+        which_or_raise("ffmpeg")
+        run_cmd([
+            "ffmpeg", "-y",
+            "-i", str(wav_path),
+            "-vn", "-ac", "1", "-ar", "16000",
+            "-c:a", "pcm_s16le",
+            str(tmp_wav),
+        ])
+    except Exception:
+        return ""
+
+    try:
+        whisper_cli = _resolve_whisper_cli()
+        model_path = _resolve_whisper_model()
+    except PipelineError:
+        tmp_wav.unlink(missing_ok=True)
+        return ""
+
+    lang = language if language else WHISPER_LANG
+    output_base = tmp_wav.parent / tmp_wav.stem
+    json_path = Path(f"{output_base}.json")
+
+    cmd = [
+        whisper_cli,
+        "--model", model_path,
+        "--file", str(tmp_wav),
+        "--language", lang,
+        "--threads", "4",
+        "--output-json",
+        "--output-file", str(output_base),
+        "--no-prints",
+    ]
+
+    try:
+        run_cmd(cmd)
+    except Exception:
+        tmp_wav.unlink(missing_ok=True)
+        json_path.unlink(missing_ok=True)
+        return ""
+
+    text = ""
+    if json_path.exists():
+        try:
+            segments = _parse_whisper_json(json_path)
+            text = " ".join(
+                s.text_en.strip() for s in segments if s.text_en.strip()
+            )
+        except Exception:
+            text = ""
+
+    tmp_wav.unlink(missing_ok=True)
+    json_path.unlink(missing_ok=True)
+
+    return text.strip()
 
 
 def release_whisper_model() -> None:

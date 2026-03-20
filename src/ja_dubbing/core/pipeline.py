@@ -3,7 +3,9 @@
 """
 メイン処理フロー。
 1つの動画を英語→日本語吹き替え動画に変換する。
-TTS エンジンとして MioTTS（話者クローン対応）と Kokoro（高速・クローン非対応）を選択可能。
+TTS エンジンとして MioTTS（話者クローン対応）、Kokoro（高速・クローン非対応）、
+GPT-SoVITS（V2ProPlus ゼロショットボイスクローン）を選択可能。
+翻訳エンジンは CAT-Translate-7b (GGUF, llama-cpp-python) を使用する。
 """
 
 from __future__ import annotations
@@ -50,8 +52,8 @@ from ja_dubbing.segments.spacy_split import (
     chunk_segments_for_spacy,
     split_segments_by_spacy_sentences,
 )
-from ja_dubbing.translation.plamo import (
-    PlamoTranslateClient,
+from ja_dubbing.translation.cat_translate import (
+    CatTranslateClient,
     translate_segments_resumable,
 )
 from ja_dubbing.tts.miotts import (
@@ -75,14 +77,14 @@ def _get_tts_engine() -> str:
 
 def _needs_speaker_diarization(tts_engine: str) -> bool:
     """話者分離が必要かどうかを判定する。"""
-    # Kokoro はボイスクローン非対応で全セグメントを同一音声で読み上げるため、
-    # 話者分離は不要
+    # Kokoro はクローン非対応なので話者分離不要
+    # MioTTS と GPT-SoVITS は話者クローンのため話者分離が必要
     return tts_engine != "kokoro"
 
 
 def process_one_video(
     video_path: Path,
-    client: PlamoTranslateClient,
+    client: CatTranslateClient,
     ref_cache: SpeakerReferenceCache,
 ) -> None:
     """1つの動画を処理する。"""
@@ -178,9 +180,6 @@ def process_one_video(
             else:
                 print_step("3. 話者分離: Kokoro TTS のため省略")
                 print_step("4. 話者ID割り当て: Kokoro TTS のため省略")
-                # Kokoro の場合は話者IDを無視するが、VibeVoice の出力をそのまま使う
-                # （後続のセグメント結合で speaker_id が同一かどうかの判定に影響するが、
-                #  Kokoro では全セグメント同一音声なので問題ない）
 
             segments_with_speaker = segments_raw
         else:
@@ -202,31 +201,26 @@ def process_one_video(
             progress.save()
 
             if need_diarization:
-                # MioTTS: 話者分離が必要
                 from ja_dubbing.diarization.alignment import assign_speakers
                 from ja_dubbing.diarization.speaker import (
                     release_pipeline,
                     run_diarization,
                 )
 
-                # 3. 話者分離
                 print_step("3. pyannote.audio で話者分離")
                 diarization = run_diarization(wav_whisper)
 
                 progress.set_step("diarization_done", True)
                 progress.save()
 
-                # 4. 話者ID割り当て
                 print_step("4. Whisperセグメントに話者ID割り当て")
                 segments_with_speaker = assign_speakers(segments_raw, diarization)
                 speaker_ids = set(s.speaker_id for s in segments_with_speaker)
                 print_step(f"   話者数: {len(speaker_ids)}, ID: {sorted(speaker_ids)}")
 
-                # pyannote パイプラインとtorchメモリを解放
                 release_pipeline()
                 force_memory_cleanup()
             else:
-                # Kokoro: 話者分離をスキップし、全セグメントに統一話者IDを設定
                 print_step("3. 話者分離: Kokoro TTS のため省略（pyannote 不使用）")
                 print_step("4. 話者ID割り当て: Kokoro TTS のため省略（統一話者ID）")
 
@@ -285,22 +279,39 @@ def process_one_video(
     if not segments_en:
         raise PipelineError("segments_en が空です。")
 
-    # ===== 6. 話者リファレンス音声生成（MioTTS のときのみ） =====
+    # ===== 6. 話者リファレンス音声生成 =====
     if tts_engine == "miotts":
         if diarization is not None:
-            print_step("6. 話者ごとの代表リファレンス音声を抽出")
+            print_step("6. 話者ごとの代表リファレンス音声を抽出（MioTTS）")
             ref_cache.build_references(video_path, diarization)
         else:
             _reload_cached_references(ref_cache, segments_en)
 
-        # 6.5. セグメント単位リファレンス音声生成
         print_step("6.5. セグメント単位のリファレンス音声を抽出（感情・テンポ対応）")
         ref_cache.build_segment_references(video_path, segments_en)
+
+    elif tts_engine == "gptsovits":
+        if diarization is not None:
+            print_step(
+                "6. GPT-SoVITS 用の話者代表リファレンス音声を抽出"
+                "（3〜10秒、声質のみ）"
+            )
+            ref_cache.build_gptsovits_references(
+                video_path, diarization
+            )
+        else:
+            _reload_cached_references(ref_cache, segments_en)
+
+        print_step(
+            "6.5. セグメント単位リファレンス: 不要"
+            "（GPT-SoVITS は声質のみ抽出のため話者代表を使い回す）"
+        )
+
     else:
         print_step("6. リファレンス音声抽出: Kokoro TTS（クローン非対応）のため省略")
 
     # ===== 7. 翻訳 =====
-    print_step("7. plamo-translate-cli (PLaMo2 Translate MLX) で翻訳（再開対応）")
+    print_step("7. CAT-Translate-7b (GGUF, llama-cpp-python) で翻訳（再開対応）")
     if progress.step("translate_done") and seg_json_enja.exists():
         print_step("   翻訳: 既に完了（segments_en_ja.json から再開）")
         segments_enja = load_segments_json(seg_json_enja)
@@ -319,13 +330,15 @@ def process_one_video(
     # ===== 8. TTS =====
     if tts_engine == "kokoro":
         _run_tts_kokoro(segments_enja, seg_audio_dir, work_dir, progress)
+    elif tts_engine == "gptsovits":
+        _run_tts_gptsovits(
+            segments_enja, seg_audio_dir, work_dir, progress, ref_cache
+        )
     else:
         _run_tts_miotts(segments_enja, seg_audio_dir, work_dir, progress, ref_cache)
 
-    # TTS完了後にメモリクリーンアップ
     force_memory_cleanup()
 
-    # TTSメタを読み込む（リタイム用）
     tts_meta_path = work_dir / "tts_meta.json"
     tts_meta = load_tts_meta(tts_meta_path)
 
@@ -351,7 +364,6 @@ def process_one_video(
     ensure_dir(ja_chunk_dir)
     ensure_dir(en_chunk_dir)
 
-    # 9-1. 映像チャンク作成
     print_step("   9-1. 映像チャンクを生成（setptsで速度変更）")
     video_chunks: list[Path] = []
     for i, part in enumerate(parts, start=1):
@@ -381,7 +393,6 @@ def process_one_video(
     progress.set_artifact("retimed_video_mp4", str(video_retimed_mp4))
     progress.save()
 
-    # 9-4. 英語音声トラック
     english_retimed_flac: Path | None = None
     if has_audio:
         print_step(
@@ -415,7 +426,6 @@ def process_one_video(
             "   9-4. 元動画に音声が無いため、英語トラックは作りません。"
         )
 
-    # 9-5. 日本語音声トラック
     print_step("   9-5. 日本語トラックを生成（無音 + TTS を順に結合）")
     ja_items: list[Path] = []
     for i, part in enumerate(parts, start=1):
@@ -465,7 +475,6 @@ def process_one_video(
         print_step(f"一時フォルダ削除: {work_dir}")
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    # 動画1本の処理完了後にメモリを解放する
     force_memory_cleanup()
     print_step("メモリクリーンアップ実行済み")
 
@@ -534,6 +543,106 @@ def _run_tts_kokoro(
         try:
             meta0 = generate_segment_tts_kokoro(
                 seg, out_audio_stub, segno=segno
+            )
+        except Exception as exc:
+            print_step(
+                f"  TTS失敗（スキップ）: seg {segno}/{total}: {exc}"
+            )
+            meta0 = None
+            tts_failed += 1
+
+        if meta0 is None:
+            tts_done += 1
+            continue
+
+        tts_meta[segno] = TtsMeta(
+            segno=segno,
+            flac_path=meta0.flac_path,
+            duration_sec=meta0.duration_sec,
+        )
+        save_tts_meta_atomic(tts_meta_path, tts_meta)
+
+        tts_done += 1
+        progress.set_step("tts", {"done_count": tts_done, "total": total})
+        progress.set_artifact("tts_meta_json", str(tts_meta_path))
+        progress.save()
+
+    if tts_failed > 0:
+        print_step(f"  TTS失敗セグメント数: {tts_failed}/{total}")
+
+    progress.set_step("tts", {"done_count": total, "total": total})
+    progress.set_artifact("tts_meta_json", str(tts_meta_path))
+    progress.save()
+
+
+def _run_tts_gptsovits(
+    segments_enja: list,
+    seg_audio_dir: Path,
+    work_dir: Path,
+    progress,
+    ref_cache: SpeakerReferenceCache,
+) -> None:
+    """GPT-SoVITS でゼロショットボイスクローン日本語音声を生成する。"""
+    from ja_dubbing.tts.gptsovits import generate_segment_tts_gptsovits
+
+    print_step(
+        "8. GPT-SoVITS V2ProPlus でゼロショットボイスクローン日本語音声生成"
+        "（話者代表リファレンス使用）"
+    )
+
+    tts_meta_path = work_dir / "tts_meta.json"
+    tts_meta = load_tts_meta(tts_meta_path)
+
+    total = len(segments_enja)
+    tts_done = 0
+    tts_failed = 0
+
+    for segno, seg in enumerate(segments_enja, start=1):
+        if seg.duration < MIN_SEGMENT_SEC:
+            tts_done += 1
+            continue
+
+        text = sanitize_text_for_tts(seg.text_ja)
+        if not text:
+            tts_done += 1
+            continue
+
+        out_audio_stub = seg_audio_dir / f"seg_{segno:05d}"
+        out_flac = out_audio_stub.with_suffix(".flac")
+
+        if segno in tts_meta and Path(tts_meta[segno].flac_path).exists():
+            tts_done += 1
+            if segno % 50 == 0:
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+            continue
+
+        if out_flac.exists():
+            dur = ffprobe_duration_sec(out_flac)
+            if dur > 0:
+                tts_meta[segno] = TtsMeta(
+                    segno=segno,
+                    flac_path=str(out_flac),
+                    duration_sec=float(dur),
+                )
+                save_tts_meta_atomic(tts_meta_path, tts_meta)
+                tts_done += 1
+                progress.set_step(
+                    "tts", {"done_count": tts_done, "total": total}
+                )
+                progress.save()
+                continue
+
+        print_step(
+            f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
+            f"speaker={seg.speaker_id} (GPT-SoVITS)"
+        )
+
+        try:
+            meta0 = generate_segment_tts_gptsovits(
+                seg, out_audio_stub, ref_cache, segno=segno
             )
         except Exception as exc:
             print_step(

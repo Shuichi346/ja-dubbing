@@ -10,11 +10,11 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-from ja_dubbing.config import KEEP_TEMP, TEMP_ROOT, TTS_ENGINE, VIDEO_EXTS, VIDEO_FOLDER
+from ja_dubbing.config import TEMP_ROOT, TTS_ENGINE, VIDEO_EXTS, VIDEO_FOLDER
 from ja_dubbing.core.pipeline import process_one_video
 from ja_dubbing.segments.spacy_split import initialize_spacy
-from ja_dubbing.servers.health import generate_start_script, preflight_server_checks
-from ja_dubbing.translation.plamo import PlamoTranslateClient
+from ja_dubbing.servers.health import generate_start_script
+from ja_dubbing.translation.cat_translate import CatTranslateClient
 from ja_dubbing.tts.reference import SpeakerReferenceCache
 from ja_dubbing.utils import (
     PipelineError,
@@ -32,12 +32,23 @@ def preflight_checks() -> None:
     ensure_dir(TEMP_ROOT)
     if not VIDEO_FOLDER.exists():
         raise PipelineError(f"VIDEO_FOLDER が存在しません: {VIDEO_FOLDER}")
-    preflight_server_checks()
+
+    tts_engine = TTS_ENGINE.strip().lower()
+
+    # MioTTS 使用時はサーバーチェック
+    if tts_engine == "miotts":
+        from ja_dubbing.servers.health import preflight_server_checks
+        preflight_server_checks()
 
     # Kokoro TTS 使用時は unidic 辞書の存在を確認する
-    if TTS_ENGINE.strip().lower() == "kokoro":
+    if tts_engine == "kokoro":
         from ja_dubbing.tts.kokoro_tts import ensure_unidic_downloaded
         ensure_unidic_downloaded()
+
+    # GPT-SoVITS 使用時は API サーバーチェック
+    if tts_engine == "gptsovits":
+        from ja_dubbing.servers.health import preflight_server_checks
+        preflight_server_checks()
 
 
 def list_videos(folder: Path) -> list[Path]:
@@ -74,7 +85,7 @@ def main() -> int:
             return 0
 
         print_step(f"処理対象動画数: {len(videos)}")
-        client = PlamoTranslateClient()
+        client = CatTranslateClient()
 
         failed: list[Path] = []
         for idx, v in enumerate(videos, start=1):

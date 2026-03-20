@@ -7,33 +7,62 @@
   </thead>
 </table>
 
-# ja-dubbing
+<p align="center">
+  <h1 align="center">ja-dubbing</h1>
+  <p align="center">A tool to convert English videos into Japanese dubbed videos while maintaining the original speaker's voice characteristics</p>
+</p>
 
-A tool to convert English videos into Japanese-dubbed videos while maintaining the original speaker's voice characteristics.
+<p align="center">
+  <img src="https://img.shields.io/badge/version-5.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
+  <img src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [System Requirements](#system-requirements)
+- [Installing Prerequisites](#installing-prerequisites)
+- [Setup](#setup)
+- [ASR Engine Selection](#asr-engine-selection)
+- [TTS Engine Selection](#tts-engine-selection)
+- [Starting Servers](#starting-servers)
+- [Execution](#execution)
+- [Processing Flow](#processing-flow)
+- [Resume Feature](#resume-feature)
+- [Configuration Items](#configuration-items)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Features
 
-- **Two ASR engines**: Switchable between whisper.cpp + Silero VAD (fast, English-focused, hallucination suppression) and VibeVoice-ASR (multilingual, built-in speaker diarization)
-- **Speaker diarization**: Identify who is speaking using pyannote.audio (Whisper mode), VibeVoice-ASR has built-in speaker diarization
-- **Two TTS engines**: Switchable between MioTTS-Inference (speaker cloning support, high quality) and Kokoro TTS (fast, lightweight, no server required)
-- **High-quality translation**: English-to-Japanese translation using plamo-translate-cli (PLaMo-2-Translate, MLX)
-- **Video speed adjustment**: Achieves natural dubbing by stretching/compressing video while keeping audio speed unchanged
+- **Two ASR engines**: Switch between whisper.cpp + Silero VAD (fast, English-focused, hallucination suppression) and VibeVoice-ASR (multilingual, built-in speaker separation)
+- **Speaker separation**: Identify who speaks what using pyannote.audio (Whisper mode), VibeVoice-ASR has built-in speaker separation
+- **Three TTS engines**: Switch between MioTTS-Inference (speaker cloning support, high quality), GPT-SoVITS V2ProPlus (zero-shot voice cloning), and Kokoro TTS (fast, lightweight, no server required)
+- **High-quality translation**: In-process English-to-Japanese translation using CAT-Translate-7b (GGUF, llama-cpp-python) without server requirements
+- **Video speed adjustment**: Stretch/compress video to match TTS audio length while maintaining natural dubbing, without changing audio speed
+- **Resume feature**: Save checkpoints at each step, allowing resumption from interruption points
 
 ## System Requirements
 
 - macOS (Apple Silicon) — Tested on Mac mini M4 (24GB)
 - Python 3.13+
 - ffmpeg / ffprobe
-- CMake (required for building whisper.cpp)
+- CMake (required for whisper.cpp build)
 - Ollama (for MioTTS LLM backend, MioTTS mode only)
+- conda (GPT-SoVITS mode only)
 
-> **Note**: Linux compatibility is currently unverified. The translation engine (plamo-translate-cli) uses MLX, so Apple Silicon Mac is required.
+> **Note**: Linux compatibility is currently unverified. Apple Silicon Mac is recommended as ASR (whisper.cpp, VibeVoice-ASR) and translation (CAT-Translate-7b) utilize MLX / Apple Silicon GPU.
 
-## Prerequisites Installation
+## Installing Prerequisites
 
-Before setup, ensure the following tools are installed:
+Before setup, ensure the following tools are installed.
 
-### Homebrew (if not already installed)
+### Homebrew (if not installed)
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -45,7 +74,7 @@ Before setup, ensure the following tools are installed:
 brew install ffmpeg
 ```
 
-### CMake (required for building whisper.cpp and plamo-translate-cli dependency sentencepiece)
+### CMake (required for whisper.cpp build and dependency library builds)
 
 ```bash
 brew install cmake
@@ -59,11 +88,19 @@ brew install uv
 
 > uv is a fast Python package manager that replaces pip. This tool uses it for all Python operations.
 
-### Ollama (required for MioTTS mode only)
+### Ollama (MioTTS mode only)
 
 Download and install the macOS version from https://ollama.com/download.
 
-> Ollama is used as the LLM backend for MioTTS. It's not used for translation. Not required for Kokoro TTS mode.
+> Ollama is used as the LLM backend for MioTTS. It's not used for translation. Not required for Kokoro TTS and GPT-SoVITS modes.
+
+### conda (GPT-SoVITS mode only)
+
+GPT-SoVITS runs in an isolated conda environment. We recommend installing miniforge.
+
+```bash
+brew install --cask miniforge
+```
 
 ## Setup
 
@@ -76,14 +113,14 @@ cd ja-dubbing
 
 ### 2. HuggingFace Preparation
 
-The pyannote.audio speaker diarization model is a gated model that requires agreement to terms of use. **If using Whisper mode (`ASR_ENGINE=whisper`)**, complete the following steps in advance. This step is not required if using only VibeVoice mode.
+pyannote.audio's speaker separation model is a gated model requiring agreement to terms of use. **If using Whisper mode (`ASR_ENGINE=whisper`)**, complete the following beforehand. This step is unnecessary if using VibeVoice mode only, or if using only Kokoro TTS (no speaker separation required).
 
 1. Create an access token at https://huggingface.co/settings/tokens (`Read` permission is sufficient)
-2. Open the following two model pages and **agree to the terms of use** to request access:
+2. Open the following two model pages and **agree to terms of use** to request access:
    - https://huggingface.co/pyannote/speaker-diarization-3.1
    - https://huggingface.co/pyannote/segmentation-3.0
 
-> Applications are typically **approved immediately**. Model download will fail if not approved.
+> Requests are typically **approved immediately**. Model downloads will fail without approval.
 
 ### 3. Install Dependencies
 
@@ -92,9 +129,9 @@ uv sync
 uv run python -m spacy download en_core_web_sm
 ```
 
-> Note: VibeVoice-ASR is a large Apple Silicon-specific package (9B parameter model). The model will be automatically downloaded on first run (~5GB).
+> Note: VibeVoice-ASR is a large Apple Silicon-specific package (9B parameter model). The model will be automatically downloaded on first run (~5GB). The CAT-Translate-7b GGUF model is also automatically downloaded via huggingface_hub on first run.
 
-### 4. Build whisper.cpp (for Whisper mode)
+### 4. Build whisper.cpp (when using Whisper mode)
 
 If using Whisper mode (`ASR_ENGINE=whisper`), you need to build whisper.cpp from source and download Whisper and VAD models. This can be done automatically with the following script:
 
@@ -103,13 +140,13 @@ chmod +x scripts/setup_whisper.sh
 ./scripts/setup_whisper.sh
 ```
 
-This script performs the following:
+This script performs:
 
-1. Clone `whisper.cpp` repository (built with Apple Silicon Metal GPU support)
+1. Clone `whisper.cpp` repository (build with Apple Silicon Metal GPU support)
 2. Download Whisper model (`ggml-large-v3-turbo`)
 3. Download Silero VAD model (`ggml-silero-v6.2.0`)
 
-> This step is not required if using only VibeVoice mode.
+> This step is unnecessary if using VibeVoice mode only.
 
 ### 5. TTS Engine Setup
 
@@ -128,7 +165,7 @@ cd ..
 
 #### Kokoro TTS Mode (`TTS_ENGINE=kokoro`)
 
-Lightweight (82M parameters) and fast TTS. No server required, runs inference directly in-process. Does not support voice cloning but offers fast processing speed for ease of use.
+Lightweight (82M parameters) and fast TTS. No server required, runs in-process inference. Does not support voice cloning but offers fast processing speed for easy use.
 
 Dependencies are automatically installed with `uv sync`. **Please additionally download the unidic dictionary required for Japanese normalization.**
 
@@ -136,7 +173,27 @@ Dependencies are automatically installed with `uv sync`. **Please additionally d
 uv run python -m unidic download
 ```
 
-> **Important**: Skipping this step will result in incorrect Japanese pronunciation during text-to-speech.
+> **Important**: Skipping this step will result in incorrect Japanese pronunciation.
+
+#### GPT-SoVITS Mode (`TTS_ENGINE=gptsovits`)
+
+Zero-shot voice cloning TTS using V2ProPlus model. Runs in an isolated conda environment and accessed via API server.
+
+```bash
+chmod +x scripts/setup_gptsovits.sh
+./scripts/setup_gptsovits.sh
+```
+
+This script performs:
+
+1. Clone GPT-SoVITS repository
+2. Create conda environment `gptsovits` (Python 3.11)
+3. Install PyTorch + dependencies
+4. Download NLTK data and pyopenjtalk dictionary
+5. Download pre-trained model (V2ProPlus)
+6. Generate `tts_infer.yaml` configuration file
+
+> **Prerequisite**: conda (miniforge/miniconda) must be installed. GPT-SoVITS runs in CPU mode.
 
 ### 6. Create Configuration File
 
@@ -149,27 +206,27 @@ Open `.env` and edit the following items:
 | Item | Description | Example |
 |------|-------------|---------|
 | `VIDEO_FOLDER` | Folder for input videos | `./input_videos` |
-| `HF_AUTH_TOKEN` | HuggingFace token (required for Whisper mode) | `hf_xxxxxxxxxxxx` |
+| `HF_AUTH_TOKEN` | HuggingFace token (required for Whisper mode + MioTTS/GPT-SoVITS) | `hf_xxxxxxxxxxxx` |
 | `ASR_ENGINE` | ASR engine selection | `whisper` or `vibevoice` |
-| `TTS_ENGINE` | TTS engine selection | `miotts` or `kokoro` |
+| `TTS_ENGINE` | TTS engine selection | `miotts`, `kokoro`, or `gptsovits` |
 
-Other configuration items will work with default values. See "Configuration Items" section below for details.
+Other configuration items work with default values. See "Configuration Items" section for details.
 
-Place English video files (.mp4, .mkv, .mov, .webm, .m4v) that you want to dub in the `VIDEO_FOLDER`.
+Place English video files (.mp4, .mkv, .mov, .webm, .m4v) in `VIDEO_FOLDER`.
 
 ## ASR Engine Selection
 
-Switch between speech recognition engines using `ASR_ENGINE` in `.env`.
+Switch audio recognition engines with `ASR_ENGINE` in `.env`.
 
 | Item | `whisper` | `vibevoice` |
 |------|-----------|-------------|
 | Engine | whisper.cpp CLI + Silero VAD | VibeVoice-ASR (Microsoft, mlx-audio) |
-| Speaker diarization | pyannote.audio (separate step) | Built-in (single pass) |
+| Speaker separation | pyannote.audio (separate step) | Built-in (single pass) |
 | Speed | Fast | Slow (several times slower than Whisper) |
 | VAD | Built-in Silero VAD (hallucination suppression) | None |
-| Language support | English-focused | Strong with multilingual mixed content |
-| Audio length limit | No limit | Supports long audio through memory optimization |
-| Additional setup | Requires running `scripts/setup_whisper.sh` | `mlx-audio[stt]>=0.3.0` |
+| Languages | English-focused | Strong with multilingual mixing |
+| Audio limit | No limit | Memory optimization supports long audio |
+| Additional setup | Requires `scripts/setup_whisper.sh` | `mlx-audio[stt]>=0.3.0` |
 | HuggingFace token | Required (for pyannote) | Not required |
 
 ### Whisper Mode (Default)
@@ -178,7 +235,7 @@ Switch between speech recognition engines using `ASR_ENGINE` in `.env`.
 ASR_ENGINE=whisper
 ```
 
-Performs fast and high-quality transcription using whisper.cpp combined with Silero VAD, and speaker diarization using pyannote.audio. VAD suppresses hallucination text in silent sections. Optimal for English audio processing.
+Combines whisper.cpp with Silero VAD for fast, high-quality transcription, with speaker separation using pyannote.audio. VAD suppresses hallucination (phantom text) in silent sections. Optimal for English audio processing.
 
 ### VibeVoice Mode
 
@@ -186,11 +243,11 @@ Performs fast and high-quality transcription using whisper.cpp combined with Sil
 ASR_ENGINE=vibevoice
 ```
 
-Microsoft's VibeVoice-ASR outputs transcription, speaker diarization, and timestamps in a single pass. Strong with multilingual mixed audio (English + local language, etc.) but processing speed is slower than Whisper.
+Microsoft's VibeVoice-ASR outputs transcription, speaker separation, and timestamps in a single pass. Strong with multilingual mixed audio (English + local languages) but slower than Whisper.
 
-Features built-in memory optimization through encoder chunking, allowing processing of long audio on 24GB unified memory Mac. Chunk size is automatically determined based on available memory, requiring no special user configuration.
+Built-in memory optimization through encoder chunking allows processing long audio on 24GB unified memory Macs. Chunk size is automatically determined based on available memory, requiring no special user configuration.
 
-VibeVoice mode does not require pyannote.audio or HuggingFace token. Steps 3 (speaker diarization) and 4 (speaker ID assignment) are automatically skipped.
+VibeVoice mode does not require pyannote.audio or HuggingFace tokens. Steps 3 (speaker separation) and 4 (speaker ID assignment) are automatically skipped.
 
 #### VibeVoice-ASR Specific Settings
 
@@ -208,16 +265,17 @@ VIBEVOICE_CONTEXT=MLX, Apple Silicon, PyTorch, Transformer
 
 ## TTS Engine Selection
 
-Switch between text-to-speech engines using `TTS_ENGINE` in `.env`.
+Switch text-to-speech engines with `TTS_ENGINE` in `.env`.
 
-| Item | `miotts` | `kokoro` |
-|------|----------|----------|
-| Engine | MioTTS-Inference | Kokoro TTS (82M parameters) |
-| Voice cloning | Supported (reproduces original speaker's voice) | Not supported (fixed voice) |
-| Processing speed | Slow | Fast |
-| Server | Required (Ollama + MioTTS API) | Not required (in-process inference) |
-| Additional setup | MioTTS-Inference clone + Ollama | `uv run python -m unidic download` |
-| Audio quality | High quality with different voice per speaker | Natural speech with fixed voice |
+| Item | `miotts` | `gptsovits` | `kokoro` |
+|------|----------|-------------|----------|
+| Engine | MioTTS-Inference | GPT-SoVITS V2ProPlus | Kokoro TTS (82M parameters) |
+| Voice cloning | Supported (segment-level reference) | Supported (zero-shot, speaker representative reference) | Not supported (fixed voice) |
+| Processing speed | Slow | Medium | Fast |
+| Server | Required (Ollama + MioTTS API) | Required (conda environment + API server) | Not required (in-process inference) |
+| Additional setup | MioTTS-Inference clone + Ollama | `scripts/setup_gptsovits.sh` + conda | `uv run python -m unidic download` |
+| Audio quality | High quality with different voice per speaker | Zero-shot voice reproduction | Natural speech with fixed voice |
+| Speaker separation | Required | Required | Not required (same voice for all speakers) |
 
 ### MioTTS Mode (Default)
 
@@ -225,7 +283,15 @@ Switch between text-to-speech engines using `TTS_ENGINE` in `.env`.
 TTS_ENGINE=miotts
 ```
 
-Speaker cloning TTS using MioTTS-Inference. Generates Japanese audio that reproduces the original speaker's voice characteristics. Requires starting Ollama (LLM backend) and MioTTS API server.
+Speaker cloning TTS using MioTTS-Inference. Generates Japanese audio reproducing original speaker voice characteristics. Prioritizes segment-level reference audio, reflecting emotion and tempo. Requires Ollama (LLM backend) and MioTTS API server startup.
+
+### GPT-SoVITS Mode
+
+```env
+TTS_ENGINE=gptsovits
+```
+
+Zero-shot voice cloning TTS using GPT-SoVITS V2ProPlus. Extracts voice quality from 3-10 second reference audio and reuses speaker representative references. Reference audio transcription text (prompt_text) is automatically generated by ASR engine. Runs in isolated conda environment without affecting ja-dubbing main Python environment.
 
 ### Kokoro TTS Mode
 
@@ -233,7 +299,7 @@ Speaker cloning TTS using MioTTS-Inference. Generates Japanese audio that reprod
 TTS_ENGINE=kokoro
 ```
 
-Kokoro is a lightweight 82M parameter open-weight TTS model. Does not support voice cloning but can generate Japanese audio quickly. No server startup required like MioTTS, operates with only the translation server (plamo-translate-cli).
+Kokoro is a lightweight 82M parameter open-weight TTS model. Does not support voice cloning but generates Japanese audio quickly. No server startup required, translation also completes in-process. Speaker separation is also omitted, making it the most convenient to use.
 
 #### Kokoro TTS Specific Settings
 
@@ -241,64 +307,66 @@ Kokoro is a lightweight 82M parameter open-weight TTS model. Does not support vo
 |---------|---------|-------------|
 | `KOKORO_MODEL` | `kokoro` | Model name |
 | `KOKORO_VOICE` | `jf_alpha` | Japanese voice name |
-| `KOKORO_HTTP_TIMEOUT` | `300.0` | HTTP timeout (seconds) |
 | `KOKORO_SPEED` | `1.0` | Speech speed (0.8-1.2 recommended) |
 
 #### Available Japanese Voices
 
-| Voice name | Gender | Grade | Description |
+| Voice Name | Gender | Grade | Description |
 |------------|--------|-------|-------------|
 | `jf_alpha` | Female | C+ | Standard Japanese female voice (recommended) |
 | `jf_gongitsune` | Female | C | "Gon the Fox" voice database |
-| `jf_nezumi` | Female | C- | "Mouse's Wedding" voice database |
+| `jf_nezumi` | Female | C- | "The Mouse's Wedding" voice database |
 | `jf_tebukuro` | Female | C | "Buying Gloves" voice database |
-| `jm_kumo` | Male | C- | "Spider's Thread" voice database |
+| `jm_kumo` | Male | C- | "The Spider's Thread" voice database |
 
-## Server Startup
+#### GPT-SoVITS Specific Settings
 
-This tool uses plamo-translate-cli server for translation. Required servers differ depending on the TTS engine. **Servers must be started before pipeline execution.**
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `GPTSOVITS_API_URL` | `http://127.0.0.1:9880` | GPT-SoVITS API URL |
+| `GPTSOVITS_CONDA_ENV` | `gptsovits` | conda environment name |
+| `GPTSOVITS_DIR` | `./GPT-SoVITS` | Installation directory |
+| `GPTSOVITS_TEXT_LANG` | `ja` | Synthesis text language |
+| `GPTSOVITS_PROMPT_LANG` | `en` | Reference audio language |
+| `GPTSOVITS_SPEED_FACTOR` | `1.0` | Speech speed |
+| `GPTSOVITS_REPETITION_PENALTY` | `1.35` | Repetition suppression penalty |
+| `GPTSOVITS_REFERENCE_MIN_SEC` | `3.0` | Minimum reference audio duration |
+| `GPTSOVITS_REFERENCE_MAX_SEC` | `10.0` | Maximum reference audio duration |
+| `GPTSOVITS_REFERENCE_TARGET_SEC` | `5.0` | Target reference audio duration |
 
-### Method A: Use Startup Script (Recommended)
+## Starting Servers
+
+Required servers vary by TTS engine. Translation uses CAT-Translate-7b for in-process inference, so no server is required.
+
+### For Kokoro TTS Mode
+
+**No external server startup required.** Both translation (CAT-Translate-7b) and TTS (Kokoro) run in-process.
+
+```bash
+uv run ja-dubbing
+```
+
+### For MioTTS Mode
+
+#### Method A: Using startup script (recommended)
 
 ```bash
 uv run ja-dubbing --generate-script
 ./start_servers.sh
 ```
 
-Appropriate startup script is automatically generated according to TTS engine settings.
+MioTTS Ollama + API server will be started. Ollama model is automatically downloaded on first run.
 
-- **Kokoro TTS mode**: Starts only plamo-translate-cli
-- **MioTTS mode**: Starts all three: plamo-translate-cli + Ollama + MioTTS-Inference
+#### Method B: Manual startup (2 terminals)
 
-PLaMo-2-Translate MLX model is automatically downloaded on first run. For MioTTS mode, Ollama model is also automatically downloaded.
-
-### Method B: Manual Startup
-
-#### For Kokoro TTS Mode (1 terminal)
-
-```bash
-# plamo-translate-cli translation server (MLX, 8bit)
-uv run plamo-translate server --precision 8bit
-```
-
-#### For MioTTS Mode (3 terminals)
-
-**Terminal 1: plamo-translate-cli translation server (MLX, 8bit)**
-
-```bash
-uv run plamo-translate server --precision 8bit
-```
-
-> The `mlx-community/plamo-2-translate-8bit` model is automatically downloaded on first startup. Wait for download completion before running `uv run ja-dubbing` below.
-
-**Terminal 2: MioTTS LLM backend (port 8000)**
+**Terminal 1: MioTTS LLM Backend (Port 8000)**
 
 ```bash
 OLLAMA_HOST=localhost:8000 ollama serve
 # First time only: OLLAMA_HOST=localhost:8000 ollama pull hf.co/Aratako/MioTTS-GGUF:MioTTS-1.7B-Q8_0.gguf
 ```
 
-**Terminal 3: MioTTS API server (port 8001)**
+**Terminal 2: MioTTS API Server (Port 8001)**
 
 ```bash
 cd MioTTS-Inference
@@ -309,11 +377,28 @@ uv run python run_server.py \
     --port 8001
 ```
 
-> **Port configuration**: Translation uses plamo-translate-cli with automatic port management via MCP protocol. MioTTS LLM Ollama (8000) port is specified via `OLLAMA_HOST` environment variable.
+### For GPT-SoVITS Mode
+
+#### Method A: Using startup script (recommended)
+
+```bash
+uv run ja-dubbing --generate-script
+./start_servers.sh
+```
+
+GPT-SoVITS API server will be started in conda environment.
+
+#### Method B: Manual startup (1 terminal)
+
+```bash
+conda activate gptsovits
+cd GPT-SoVITS
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+```
 
 ## Execution
 
-Run from a separate terminal while servers are running.
+For TTS engines requiring servers, run from another terminal with servers already started.
 
 ```bash
 uv run ja-dubbing
@@ -321,54 +406,75 @@ uv run ja-dubbing
 
 Automatically detects videos in `VIDEO_FOLDER` and processes them sequentially. Output is saved as `*_jaDub.mp4` in the same folder as input videos. Specify any `VIDEO_FOLDER` path in `.env`.
 
+### Generating Startup Script
+
+```bash
+uv run ja-dubbing --generate-script
+```
+
+Automatically generates appropriate server startup script `start_servers.sh` based on TTS engine settings.
+
 ## Processing Flow
 
 ### Whisper Mode + MioTTS (`ASR_ENGINE=whisper`, `TTS_ENGINE=miotts`)
 
 1. Extract 16kHz mono WAV from video using ffmpeg
-2. English transcription using whisper.cpp + Silero VAD (suppress hallucinations in silent sections)
-3. Speaker diarization using pyannote.audio
+2. English transcription with whisper.cpp + Silero VAD (suppress hallucination in silent sections)
+3. Speaker separation with pyannote.audio
 4. Assign speaker IDs to Whisper segments
-5. Segment combination → spaCy sentence splitting → translation unit combination (maintaining speaker boundaries)
-6. Extract reference audio for each speaker from original video
-7. English-to-Japanese translation using plamo-translate-cli (PLaMo-2-Translate, MLX 8bit)
-8. Generate speaker-cloned Japanese audio using MioTTS-Inference
-9. Speed-adjust each section of original video to match TTS audio length
+5. Segment merging → spaCy sentence splitting → translation unit merging (maintain speaker boundaries)
+6. Extract speaker representative reference audio + segment-level reference audio from original video
+7. English-to-Japanese translation with CAT-Translate-7b (GGUF, llama-cpp-python) in-process inference
+8. Generate speaker-cloned Japanese audio with MioTTS-Inference (prioritize segment-level reference)
+9. Speed-adjust original video sections to match TTS audio length
+10. Combine video + Japanese audio (+ lightly mixed English audio) for output
+
+### Whisper Mode + GPT-SoVITS (`ASR_ENGINE=whisper`, `TTS_ENGINE=gptsovits`)
+
+1. Extract 16kHz mono WAV from video using ffmpeg
+2. English transcription with whisper.cpp + Silero VAD
+3. Speaker separation with pyannote.audio
+4. Assign speaker IDs to Whisper segments
+5. Segment merging → spaCy sentence splitting → translation unit merging
+6. Extract speaker representative reference audio (3-10 seconds) + ASR transcription
+7. English-to-Japanese translation with CAT-Translate-7b (GGUF, llama-cpp-python) in-process inference
+8. Generate zero-shot voice-cloned Japanese audio with GPT-SoVITS V2ProPlus
+9. Speed-adjust original video sections to match TTS audio length
 10. Combine video + Japanese audio (+ lightly mixed English audio) for output
 
 ### Whisper Mode + Kokoro (`ASR_ENGINE=whisper`, `TTS_ENGINE=kokoro`)
 
 1. Extract 16kHz mono WAV from video using ffmpeg
-2. English transcription using whisper.cpp + Silero VAD (suppress hallucinations in silent sections)
-3. Speaker diarization using pyannote.audio
-4. Assign speaker IDs to Whisper segments
-5. Segment combination → spaCy sentence splitting → translation unit combination (maintaining speaker boundaries)
-6. Skip reference audio extraction (Kokoro doesn't support cloning)
-7. English-to-Japanese translation using plamo-translate-cli (PLaMo-2-Translate, MLX 8bit)
-8. Generate Japanese audio quickly using Kokoro TTS
-9. Speed-adjust each section of original video to match TTS audio length
+2. English transcription with whisper.cpp + Silero VAD (suppress hallucination in silent sections)
+3. Speaker separation: Skipped (Kokoro doesn't support cloning, pyannote not used)
+4. Assign unified speaker ID to all segments
+5. Segment merging → spaCy sentence splitting → translation unit merging
+6. Reference audio extraction skipped (Kokoro doesn't support cloning)
+7. English-to-Japanese translation with CAT-Translate-7b (GGUF, llama-cpp-python) in-process inference
+8. Generate Japanese audio quickly with Kokoro TTS
+9. Speed-adjust original video sections to match TTS audio length
 10. Combine video + Japanese audio (+ lightly mixed English audio) for output
 
 ### VibeVoice Mode (`ASR_ENGINE=vibevoice`)
 
 1. Extract 16kHz mono WAV from video using ffmpeg
-2. Transcription + speaker diarization + timestamp acquisition using VibeVoice-ASR (single pass, memory optimization through chunk encoding)
-3. (Skipped: built into VibeVoice-ASR)
-4. (Skipped: built into VibeVoice-ASR)
-5. Segment combination → spaCy sentence splitting → translation unit combination (maintaining speaker boundaries)
-6. MioTTS: Extract reference audio for each speaker from original video / Kokoro: Skip
-7. English-to-Japanese translation using plamo-translate-cli (PLaMo-2-Translate, MLX 8bit)
-8. MioTTS: Generate speaker-cloned Japanese audio / Kokoro: Generate Japanese audio quickly
-9. Speed-adjust each section of original video to match TTS audio length
+2. Transcription + speaker separation + timestamp acquisition with VibeVoice-ASR (single pass, memory optimization through chunk encoding)
+3. (Skipped: built-in to VibeVoice-ASR)
+4. (Skipped: built-in to VibeVoice-ASR)
+5. Segment merging → spaCy sentence splitting → translation unit merging (maintain speaker boundaries)
+6. MioTTS: Extract speaker reference audio from original video / GPT-SoVITS: Extract representative reference (3-10 seconds) / Kokoro: Skip
+7. English-to-Japanese translation with CAT-Translate-7b (GGUF, llama-cpp-python) in-process inference
+8. MioTTS: Generate speaker-cloned Japanese audio / GPT-SoVITS: Generate zero-shot cloned audio / Kokoro: Generate Japanese audio quickly
+9. Speed-adjust original video sections to match TTS audio length
 10. Combine video + Japanese audio (+ lightly mixed English audio) for output
 
-## Resume Functionality
+## Resume Feature
 
-Processing saves checkpoints at each step. If interrupted, re-running will resume from where it left off. Checkpoints are saved in `temp/<video_name>/progress.json`.
+Processing saves checkpoints at each step. If interrupted, re-execution resumes from where it left off. Checkpoints are saved in `temp/<video_name>/progress.json`.
 
-To start from scratch, delete the corresponding `temp/<video_name>/` folder before re-running.
+To restart from the beginning, delete the corresponding `temp/<video_name>/` folder before re-execution.
 
-> **Note when switching ASR or TTS engines**: To restart a partially processed video with a different engine, delete the `temp/<video_name>/` folder before re-running.
+> **Note when switching ASR or TTS engines**: To redo a partially processed video with different engines, delete the `temp/<video_name>/` folder before re-execution.
 
 ## Configuration Items
 
@@ -381,19 +487,31 @@ All settings are managed in the `.env` file. `.env.example` contains all configu
 | `VIDEO_FOLDER` | `./input_videos` | Input video folder |
 | `TEMP_ROOT` | `./temp` | Temporary files folder |
 | `ASR_ENGINE` | `whisper` | ASR engine (`whisper` or `vibevoice`) |
-| `TTS_ENGINE` | `miotts` | TTS engine (`miotts` or `kokoro`) |
-| `HF_AUTH_TOKEN` | (Required for Whisper mode) | HuggingFace token |
+| `TTS_ENGINE` | `miotts` | TTS engine (`miotts`, `kokoro`, or `gptsovits`) |
+| `HF_AUTH_TOKEN` | (Required for Whisper mode + cloning-capable TTS) | HuggingFace token |
 
 ### ASR Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `WHISPER_MODEL` | `large-v3-turbo` | Whisper model name |
+| `WHISPER_LANG` | `en` | Whisper recognition language |
 | `VAD_MODEL` | `silero-v6.2.0` | VAD model name |
 | `WHISPER_CPP_DIR` | `./whisper.cpp` | whisper.cpp installation directory |
 | `VIBEVOICE_MODEL` | `mlx-community/VibeVoice-ASR-8bit` | VibeVoice-ASR model name |
 | `VIBEVOICE_MAX_TOKENS` | `32768` | VibeVoice-ASR maximum tokens |
 | `VIBEVOICE_CONTEXT` | (empty) | VibeVoice-ASR hot words |
+
+### Translation Settings (CAT-Translate-7b)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `CAT_TRANSLATE_REPO` | `mradermacher/CAT-Translate-7b-GGUF` | GGUF model HuggingFace repository |
+| `CAT_TRANSLATE_FILE` | `CAT-Translate-7b.Q8_0.gguf` | GGUF file name |
+| `CAT_TRANSLATE_N_GPU_LAYERS` | `-1` | GPU offload layer count (-1 for all layers) |
+| `CAT_TRANSLATE_N_CTX` | `4096` | Context window size |
+| `CAT_TRANSLATE_RETRIES` | `3` | Translation retry count |
+| `CAT_TRANSLATE_REPEAT_PENALTY` | `1.2` | Repetition suppression penalty |
 
 ### TTS Settings
 
@@ -401,16 +519,25 @@ All settings are managed in the `.env` file. `.env.example` contains all configu
 |---------|---------|-------------|
 | `MIOTTS_API_URL` | `http://localhost:8001` | MioTTS API URL |
 | `MIOTTS_DEVICE` | `mps` | MioTTS codec device |
+| `MIOTTS_REFERENCE_MAX_SEC` | `20.0` | MioTTS reference audio limit (seconds) |
 | `KOKORO_MODEL` | `kokoro` | Kokoro model name |
 | `KOKORO_VOICE` | `jf_alpha` | Kokoro Japanese voice |
-| `KOKORO_HTTP_TIMEOUT` | `300.0` | Kokoro HTTP timeout (seconds) |
 | `KOKORO_SPEED` | `1.0` | Kokoro speech speed |
+| `GPTSOVITS_API_URL` | `http://127.0.0.1:9880` | GPT-SoVITS API URL |
+| `GPTSOVITS_SPEED_FACTOR` | `1.0` | GPT-SoVITS speech speed |
 
-### Translation & Output Settings
+### Translation Anomaly Detection Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `PLAMO_TRANSLATE_PRECISION` | `8bit` | Translation model precision (4bit / 8bit / bf16) |
+| `OUTPUT_REPEAT_THRESHOLD` | `3` | Translation output repetition detection threshold |
+| `INPUT_REPEAT_THRESHOLD` | `4` | Translation input repetition detection threshold |
+| `INPUT_UNIQUE_RATIO_THRESHOLD` | `0.3` | Translation input unique ratio threshold |
+
+### Output Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | `ENGLISH_VOLUME` | `0.10` | English audio volume (0.0-1.0) |
 | `JAPANESE_VOLUME` | `1.00` | Japanese audio volume (0.0-1.0) |
 | `OUTPUT_SIZE` | `720` | Output video height (pixels) |
@@ -418,12 +545,13 @@ All settings are managed in the `.env` file. `.env.example` contains all configu
 
 ## Known Limitations
 
-- **English-Japanese mixed content**: When English words are mixed like "utilizing simulation tools such as Omniverse and ISACsim", TTS may not read correctly.
-- **Processing time**: Even a 3-minute video can take tens of minutes. Long videos may cause errors, so **splitting to about 8 minutes beforehand** is recommended.
-- **Translation quality**: Local LLM translation may have quality variations compared to cloud APIs.
-- **Kokoro TTS**: Does not support voice cloning, so all speakers will have the same voice. Suitable when prioritizing speed or when voice reproduction is not required.
-- **VibeVoice-ASR processing speed**: Takes several times longer compared to Whisper.
-- **VibeVoice-ASR memory usage**: Uses about 5GB of memory even with 8bit quantization due to 9B parameter model. Features built-in memory optimization through chunk encoding, tested on 24GB unified memory Mac.
+- **English-Japanese mixing**: When English words are mixed like "utilize simulation tools such as Omniverse and ISACsim", TTS may not read correctly.
+- **Processing time**: Even 3-minute videos take tens of minutes. Long videos may cause errors, so **pre-splitting to about 8 minutes** is recommended.
+- **Translation quality**: Local LLM (CAT-Translate-7b) translation varies in accuracy compared to cloud APIs.
+- **Kokoro TTS**: Does not support voice cloning, so all speakers have the same voice. Suitable when prioritizing speed or when voice reproduction is unnecessary.
+- **GPT-SoVITS**: Runs in CPU mode, slower inference compared to MPS/CUDA environments. Reference audio only extracts voice quality (timbre), not reflecting intonation or tempo.
+- **VibeVoice-ASR processing speed**: Takes several times longer than Whisper.
+- **VibeVoice-ASR memory usage**: 9B parameter model uses about 5GB memory even with 8bit quantization. Built-in memory optimization through chunk encoding, verified on 24GB unified memory Mac.
 
 ## Troubleshooting
 
@@ -440,15 +568,15 @@ If CMake is not installed, run `brew install cmake` first.
 
 ### Out of memory
 
-Tested on Mac mini M4 with 24GB unified memory. To save memory, ASR models (Whisper / VibeVoice-ASR) and pyannote pipeline are released after use. VibeVoice mode suppresses memory spikes during long audio processing through encoder chunking. For long videos, set `KEEP_TEMP=true` and utilize interruption/resume functionality.
+Tested on Mac mini M4 with 24GB unified memory. For memory conservation, ASR models (Whisper/VibeVoice-ASR) and pyannote pipeline are released after use. VibeVoice mode uses encoder chunk processing to suppress memory spikes even with long audio. MLX and PyTorch MPS caches are also cleared after each step. For long videos, set `KEEP_TEMP=true` and use interruption/resume functionality.
 
 ### MioTTS text too long error
 
-MioTTS default maximum text length is 300 characters. This tool specifies `--max-text-length 500` during server startup and also performs truncation processing at punctuation marks on the pipeline side.
+MioTTS default maximum text length is 300 characters. This tool specifies `--max-text-length 500` when starting the server and also performs truncation processing at punctuation positions on the pipeline side.
 
 ### Kokoro TTS Japanese pronunciation issues
 
-The unidic dictionary may not be downloaded. Run the following:
+unidic dictionary may not be downloaded. Run the following:
 
 ```bash
 uv run python -m unidic download
@@ -464,9 +592,23 @@ uv pip install 'mlx-audio[stt]>=0.3.0'
 
 ### VibeVoice-ASR empty transcription results
 
-The audio file may not contain speech or the audio may be too short. Try increasing `VIBEVOICE_MAX_TOKENS` or switch to Whisper mode.
+Audio file may not contain speech or audio may be too short. Try increasing `VIBEVOICE_MAX_TOKENS` or switch to Whisper mode.
 
-> plamo-translate-cli automatically manages ports using MCP protocol. Configuration file is saved to `$TMPDIR/plamo-translate-config.json`.
+### CAT-Translate-7b model download failure
+
+Automatically downloaded via huggingface_hub. Check network connection and re-execute. Model is downloaded from `mradermacher/CAT-Translate-7b-GGUF`.
+
+### Cannot connect to GPT-SoVITS API server
+
+Check if conda environment is properly set up.
+
+```bash
+conda activate gptsovits
+cd GPT-SoVITS
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+```
+
+If not set up, run `scripts/setup_gptsovits.sh` first.
 
 ## License
 
@@ -474,13 +616,14 @@ MIT License
 
 Note: External models and libraries used by this tool have their own respective licenses.
 
-- MioTTS default presets: Use audio generated by T5Gemma-TTS / Gemini TTS, commercial use not permitted
-- PLaMo-2-Translate: PLaMo Community License (commercial use requires application)
-- plamo-translate-cli: Apache-2.0 License
-- pyannote.audio: MIT License (models are gated, requires agreement to terms of use on HuggingFace)
-- whisper.cpp: MIT License
-- Silero VAD: MIT License
-- VibeVoice-ASR: MIT License
-- mlx-audio: MIT License
-- Kokoro TTS (Kokoro-82M): Apache-2.0 License
-- misaki (G2P): MIT License
+- MioTTS default presets
+- CAT-Translate-7b
+- pyannote.audio
+- whisper.cpp
+- Silero VAD
+- VibeVoice-ASR
+- mlx-audio
+- Kokoro TTS (Kokoro-82M)
+- misaki (G2P)
+- GPT-SoVITS
+- llama-cpp-python
