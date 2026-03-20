@@ -4,6 +4,11 @@
 MioTTS-Inference APIによる音声合成処理。
 話者クローン音声を生成する。
 セグメント単位リファレンスを優先し、なければ話者代表リファレンスにフォールバックする。
+
+品質改善:
+- LLMサンプリングパラメータを最適化して安定したトークン生成を促す
+- 生成音声の長さバリデーションで異常（極端に遅い/速い音声）を検出する
+- 品質不良時は自動リトライする（HTTPリトライとは独立カウント）
 """
 
 from __future__ import annotations
@@ -18,9 +23,19 @@ from typing import Any, Dict, List, Optional
 from ja_dubbing.audio.ffmpeg import ffprobe_duration_sec
 from ja_dubbing.config import (
     MIOTTS_API_URL,
+    MIOTTS_DURATION_PER_CHAR_MAX,
+    MIOTTS_DURATION_PER_CHAR_MIN,
     MIOTTS_HTTP_TIMEOUT,
+    MIOTTS_LLM_FREQUENCY_PENALTY,
+    MIOTTS_LLM_MAX_TOKENS,
+    MIOTTS_LLM_PRESENCE_PENALTY,
+    MIOTTS_LLM_REPETITION_PENALTY,
+    MIOTTS_LLM_TEMPERATURE,
+    MIOTTS_LLM_TOP_P,
     MIOTTS_MAX_TEXT_LENGTH,
+    MIOTTS_QUALITY_RETRIES,
     MIOTTS_TTS_RETRIES,
+    MIOTTS_VALIDATION_MIN_CHARS,
     MIN_SEGMENT_SEC,
     TTS_CHANNELS,
     TTS_SAMPLE_RATE,
@@ -39,10 +54,82 @@ from ja_dubbing.utils import (
 )
 
 
+class TTSQualityError(Exception):
+    """TTS品質バリデーション失敗を示す例外。"""
+
+
+# =========================================================
+# LLM サンプリングパラメータ構築
+# =========================================================
+
+
+def _build_llm_params(quality_attempt: int = 1) -> Dict[str, Any]:
+    """MioTTS APIに送るLLMサンプリングパラメータを構築する。
+
+    品質リトライの回数に応じてtemperatureを段階的に下げ、
+    生成の安定性を高める。
+    """
+    temp_reduction = 0.15 * (quality_attempt - 1)
+    temperature = max(0.1, MIOTTS_LLM_TEMPERATURE - temp_reduction)
+
+    return {
+        "temperature": temperature,
+        "top_p": MIOTTS_LLM_TOP_P,
+        "max_tokens": MIOTTS_LLM_MAX_TOKENS,
+        "repetition_penalty": MIOTTS_LLM_REPETITION_PENALTY,
+        "presence_penalty": MIOTTS_LLM_PRESENCE_PENALTY,
+        "frequency_penalty": MIOTTS_LLM_FREQUENCY_PENALTY,
+    }
+
+
+# =========================================================
+# 品質バリデーション
+# =========================================================
+
+
+def _validate_audio_quality(
+    audio_duration_sec: float,
+    text: str,
+) -> None:
+    """生成音声の品質をバリデーションする。
+
+    日本語テキストの文字数に対する音声の長さ比率を検査し、
+    異常に長い（スロー音声）や短い（崩壊音声）を検出する。
+    """
+    char_count = len(text.strip())
+    if char_count < MIOTTS_VALIDATION_MIN_CHARS:
+        return
+
+    if audio_duration_sec <= 0:
+        raise TTSQualityError("生成音声の長さが0秒以下")
+
+    duration_per_char = audio_duration_sec / char_count
+
+    if duration_per_char > MIOTTS_DURATION_PER_CHAR_MAX:
+        raise TTSQualityError(
+            f"音声が異常に長い: {audio_duration_sec:.1f}秒 / {char_count}文字 "
+            f"= {duration_per_char:.3f}秒/文字 "
+            f"(上限: {MIOTTS_DURATION_PER_CHAR_MAX:.3f}秒/文字)"
+        )
+
+    if duration_per_char < MIOTTS_DURATION_PER_CHAR_MIN:
+        raise TTSQualityError(
+            f"音声が異常に短い: {audio_duration_sec:.1f}秒 / {char_count}文字 "
+            f"= {duration_per_char:.3f}秒/文字 "
+            f"(下限: {MIOTTS_DURATION_PER_CHAR_MIN:.3f}秒/文字)"
+        )
+
+
+# =========================================================
+# API 呼び出し
+# =========================================================
+
+
 def miotts_synthesize(
     text_ja: str,
     out_wav: Path,
     reference_base64: str,
+    quality_attempt: int = 1,
 ) -> None:
     """MioTTS APIでリファレンス音声によるクローン音声を生成する。"""
     ensure_dir(out_wav.parent)
@@ -54,6 +141,7 @@ def miotts_synthesize(
             "type": "base64",
             "data": reference_base64,
         },
+        "llm": _build_llm_params(quality_attempt),
         "output": {
             "format": "wav",
         },
@@ -86,6 +174,7 @@ def miotts_synthesize_preset(
     text_ja: str,
     out_wav: Path,
     preset_id: str = "jp_female",
+    quality_attempt: int = 1,
 ) -> None:
     """MioTTS APIでプリセット音声を生成する（リファレンスなし時のフォールバック）。"""
     ensure_dir(out_wav.parent)
@@ -97,6 +186,7 @@ def miotts_synthesize_preset(
             "type": "preset",
             "preset_id": preset_id,
         },
+        "llm": _build_llm_params(quality_attempt),
         "output": {
             "format": "wav",
         },
@@ -116,6 +206,11 @@ def miotts_synthesize_preset(
         raise PipelineError(f"MioTTS プリセット呼び出し失敗: {exc}") from exc
 
     out_wav.write_bytes(wav_bytes)
+
+
+# =========================================================
+# 変換ヘルパー
+# =========================================================
 
 
 def ensure_wav_format(in_wav: Path, out_wav: Path) -> None:
@@ -172,32 +267,104 @@ def _resolve_reference_base64(
     return ref_cache.get_reference_base64(speaker_id)
 
 
-def _synthesize_with_retry(
+# =========================================================
+# HTTP リトライ（内側ループ: ネットワーク障害対策）
+# =========================================================
+
+
+def _call_api_with_http_retry(
     text: str,
     tmp_raw: Path,
     ref_b64: Optional[str],
-    max_retries: int = MIOTTS_TTS_RETRIES,
+    quality_attempt: int,
 ) -> None:
-    """MioTTS APIをリトライ付きで呼び出す。"""
+    """MioTTS APIをHTTPリトライ付きで1回分呼び出す。
+
+    品質バリデーションは行わない（呼び出し元で実施する）。
+    """
     last_err: Optional[Exception] = None
-    for attempt in range(1, max_retries + 1):
+    http_attempts = MIOTTS_TTS_RETRIES + 1
+
+    for http_try in range(1, http_attempts + 1):
         try:
             if ref_b64:
-                miotts_synthesize(text, tmp_raw, ref_b64)
+                miotts_synthesize(text, tmp_raw, ref_b64, quality_attempt)
             else:
-                miotts_synthesize_preset(text, tmp_raw, preset_id="jp_female")
+                miotts_synthesize_preset(
+                    text, tmp_raw, preset_id="jp_female",
+                    quality_attempt=quality_attempt,
+                )
             return
         except Exception as exc:
             last_err = exc
-            if attempt < max_retries:
-                wait = 2.0 * attempt
+            if http_try < http_attempts:
+                wait = 2.0 * http_try
                 print_step(
-                    f"    TTS リトライ {attempt}/{max_retries}: "
+                    f"    HTTP リトライ {http_try}/{http_attempts}: "
                     f"{wait:.0f}秒待機... ({exc})"
                 )
                 time.sleep(wait)
 
-    raise PipelineError(f"MioTTS リトライ枯渇: {last_err}")
+    raise PipelineError(f"MioTTS HTTP リトライ枯渇: {last_err}")
+
+
+# =========================================================
+# 品質リトライ（外側ループ: 音声品質対策）
+# =========================================================
+
+
+def _synthesize_with_quality_retry(
+    text: str,
+    tmp_raw: Path,
+    ref_b64: Optional[str],
+) -> None:
+    """品質バリデーション付きでMioTTS APIを呼び出す。
+
+    外側ループ: 品質リトライ（MIOTTS_QUALITY_RETRIES 回）
+    内側ループ: HTTP リトライ（MIOTTS_TTS_RETRIES 回、_call_api_with_http_retry 内）
+
+    品質リトライのたびに temperature を段階的に下げて安定性を高める。
+    """
+    quality_attempts = MIOTTS_QUALITY_RETRIES + 1
+
+    for q_try in range(1, quality_attempts + 1):
+        _call_api_with_http_retry(text, tmp_raw, ref_b64, quality_attempt=q_try)
+
+        # 品質バリデーション
+        if not tmp_raw.exists() or tmp_raw.stat().st_size <= 100:
+            if q_try < quality_attempts:
+                print_step(
+                    f"    品質リトライ {q_try}/{quality_attempts}: "
+                    "生成ファイルが空 → 再生成"
+                )
+                continue
+            raise PipelineError("MioTTS: 生成ファイルが空")
+
+        try:
+            dur = ffprobe_duration_sec(tmp_raw)
+            _validate_audio_quality(dur, text)
+            return
+        except TTSQualityError as exc:
+            if q_try < quality_attempts:
+                wait = 1.0 * q_try
+                print_step(
+                    f"    品質リトライ {q_try}/{quality_attempts}: "
+                    f"{exc} → {wait:.0f}秒後に再生成"
+                )
+                tmp_raw.unlink(missing_ok=True)
+                time.sleep(wait)
+            else:
+                # 最終リトライも失敗 → 最後の生成結果をそのまま使う
+                print_step(
+                    f"    品質リトライ枯渇 {q_try}/{quality_attempts}: "
+                    f"{exc} → そのまま使用"
+                )
+                return
+
+
+# =========================================================
+# セグメント単位の TTS 生成
+# =========================================================
 
 
 def generate_segment_tts(
@@ -231,7 +398,7 @@ def generate_segment_tts(
     tmp_norm = out_audio_stub.with_suffix(".norm.wav")
 
     try:
-        _synthesize_with_retry(text, tmp_raw, ref_b64)
+        _synthesize_with_quality_retry(text, tmp_raw, ref_b64)
 
         ensure_wav_format(tmp_raw, tmp_norm)
         convert_to_flac(tmp_norm, out_flac)
@@ -248,6 +415,11 @@ def generate_segment_tts(
     if dur <= 0:
         return None
     return TtsMeta(segno=segno, flac_path=str(out_flac), duration_sec=float(dur))
+
+
+# =========================================================
+# TTS メタ I/O
+# =========================================================
 
 
 def load_tts_meta(path: Path) -> Dict[int, TtsMeta]:
