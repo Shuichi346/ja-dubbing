@@ -321,9 +321,10 @@ def process_one_video(
             _reload_cached_references(ref_cache, segments_en)
 
         print_step(
-            "6.5. セグメント単位リファレンス: 不要"
-            "（T5Gemma-TTS は話者代表リファレンスを使用）"
+            "6.5. T5Gemma-TTS セグメント単位リファレンス音声を抽出"
+            "（ASR 再文字起こしで音声・テキスト一致を保証）"
         )
+        ref_cache.build_t5gemma_segment_references(video_path, segments_en)
 
     else:
         print_step("6. リファレンス音声抽出: Kokoro TTS（クローン非対応）のため省略")
@@ -712,7 +713,7 @@ def _run_tts_t5gemma(
 
     print_step(
         "8. T5Gemma-TTS でボイスクローン日本語音声生成"
-        "（再生時間制御あり）"
+        "（セグメント単位リファレンス優先、再生時間制御あり）"
     )
 
     tts_meta_path = work_dir / "tts_meta.json"
@@ -761,9 +762,14 @@ def _run_tts_t5gemma(
                     progress.save()
                     continue
 
+            # セグメント単位リファレンスの有無を表示
+            has_seg_ref = (
+                ref_cache.get_t5gemma_segment_reference_path(segno) is not None
+            )
+            ref_type = "セグメント単位" if has_seg_ref else "話者代表"
             print_step(
                 f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
-                f"speaker={seg.speaker_id} (T5Gemma)"
+                f"speaker={seg.speaker_id} ref={ref_type} (T5Gemma)"
             )
 
             try:
@@ -910,3 +916,4 @@ def _reload_cached_references(
     speaker_ids = set(s.speaker_id for s in segments if s.speaker_id)
     ref_cache.reload_speaker_references(speaker_ids)
     ref_cache.reload_segment_references(len(segments))
+    ref_cache.reload_t5gemma_segment_references(len(segments))

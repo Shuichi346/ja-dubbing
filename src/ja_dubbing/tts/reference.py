@@ -6,7 +6,9 @@
 
 GPT-SoVITS 用の代表リファレンス（3〜10秒）も管理する。
 GPT-SoVITS ではセグメント単位リファレンスは不要（声質のみ抽出されるため）。
-T5Gemma-TTS 用の代表リファレンス（3〜15秒）も管理する。
+T5Gemma-TTS 用の代表リファレンス（3〜15秒）とセグメント単位リファレンスを管理する。
+T5Gemma-TTS のセグメント単位リファレンスでは、参照音声を ASR で再文字起こしし、
+音声とテキストの一致を保証する。
 """
 
 from __future__ import annotations
@@ -55,6 +57,10 @@ class SpeakerReferenceCache:
         self._t5gemma_refs: Dict[str, Path] = {}
         # T5Gemma-TTS 用: 参照音声の書き起こしテキスト（英語文字起こし再利用）
         self._t5gemma_prompt_texts: Dict[str, str] = {}
+        # T5Gemma-TTS 用: セグメント単位リファレンス音声
+        self._t5gemma_segment_refs: Dict[int, Path] = {}
+        # T5Gemma-TTS 用: セグメント単位リファレンスの書き起こしテキスト
+        self._t5gemma_segment_prompt_texts: Dict[int, str] = {}
         ensure_dir(cache_dir)
 
     @property
@@ -102,6 +108,8 @@ class SpeakerReferenceCache:
         self._load_gptsovits_prompt_meta()
         # T5Gemma-TTS プロンプトメタデータを読み込む
         self._load_t5gemma_prompt_meta()
+        # T5Gemma-TTS セグメント単位メタデータを読み込む
+        self._load_t5gemma_segment_meta()
 
     def build_references(
         self,
@@ -333,6 +341,17 @@ class SpeakerReferenceCache:
         """T5Gemma-TTS 参照音声の英語テキストを返す。"""
         return self._t5gemma_prompt_texts.get(speaker_id, "")
 
+    def get_t5gemma_segment_reference_path(self, segno: int) -> Optional[Path]:
+        """T5Gemma-TTS セグメント単位リファレンス音声のパスを返す。"""
+        path = self._t5gemma_segment_refs.get(segno)
+        if path and path.exists():
+            return path.resolve()
+        return None
+
+    def get_t5gemma_segment_prompt_text(self, segno: int) -> str:
+        """T5Gemma-TTS セグメント単位リファレンスの書き起こしテキストを返す。"""
+        return self._t5gemma_segment_prompt_texts.get(segno, "")
+
     def build_t5gemma_references(
         self,
         video_path: Path,
@@ -340,6 +359,8 @@ class SpeakerReferenceCache:
         segments: List[Segment],
     ) -> None:
         """T5Gemma-TTS 用の話者代表リファレンス音声を生成する。"""
+        from ja_dubbing.asr import transcribe_reference_audio
+
         speakers: Dict[str, List[DiarizationSegment]] = {}
         for dia in diarization:
             speakers.setdefault(dia.speaker, []).append(dia)
@@ -378,7 +399,22 @@ class SpeakerReferenceCache:
             if out_wav.exists() and out_wav.stat().st_size > 100:
                 self._t5gemma_refs[speaker_id] = out_wav
                 ref_dur = best_seg.end - best_seg.start
-                prompt_text = _collect_reference_prompt_text(best_seg, segments)
+
+                # 参照音声を ASR で直接文字起こしする（GPT-SoVITS と同様）
+                prompt_text = transcribe_reference_audio(
+                    out_wav, language="en",
+                )
+                if not prompt_text:
+                    # ASR 失敗時はセグメントテキストからフォールバック
+                    prompt_text = _collect_reference_prompt_text(
+                        best_seg, segments
+                    )
+                    if prompt_text:
+                        print_step(
+                            f"    ASR 失敗: {speaker_id} → "
+                            "セグメントテキストからフォールバック"
+                        )
+
                 self._t5gemma_prompt_texts[speaker_id] = prompt_text
                 prompt_meta[speaker_id] = {
                     "prompt_text": prompt_text,
@@ -394,6 +430,89 @@ class SpeakerReferenceCache:
                 out_wav.unlink(missing_ok=True)
 
         self._save_t5gemma_prompt_meta(prompt_meta)
+
+    def build_t5gemma_segment_references(
+        self,
+        video_path: Path,
+        segments: List[Segment],
+    ) -> None:
+        """
+        T5Gemma-TTS 用のセグメント単位リファレンス音声を生成する。
+
+        各セグメントの元英語音声を切り出し、ASR エンジンで直接文字起こしして
+        参照テキストを生成する。これにより参照音声とテキストの一致を保証する。
+        """
+        from ja_dubbing.asr import transcribe_reference_audio
+
+        seg_ref_dir = self._cache_dir / "t5gemma_segment_refs"
+        ensure_dir(seg_ref_dir)
+
+        segment_meta: Dict[str, Dict[str, str | float]] = {}
+
+        for segno, seg in enumerate(segments, start=1):
+            out_wav = seg_ref_dir / f"t5seg_ref_{segno:05d}.wav"
+
+            # 既にキャッシュがあり、メタデータも読み込み済みならスキップ
+            if out_wav.exists() and segno in self._t5gemma_segment_prompt_texts:
+                self._t5gemma_segment_refs[segno] = out_wav
+                continue
+
+            dur = seg.end - seg.start
+            if dur < 0.3:
+                continue
+
+            # T5Gemma の参照音声上限でクリップ
+            effective_end = seg.start + min(dur, T5GEMMA_REFERENCE_MAX_SEC)
+
+            if not out_wav.exists():
+                extract_audio_segment(
+                    video_path, out_wav,
+                    start=seg.start, end=effective_end,
+                    sample_rate=44100, channels=1,
+                )
+
+            if not out_wav.exists() or out_wav.stat().st_size <= 100:
+                out_wav.unlink(missing_ok=True)
+                continue
+
+            self._t5gemma_segment_refs[segno] = out_wav
+
+            # 切り出した参照音声を ASR で直接文字起こしする
+            prompt_text = transcribe_reference_audio(
+                out_wav, language="en",
+            )
+            if not prompt_text:
+                # ASR 失敗時は元のセグメントの英語テキストをフォールバック
+                prompt_text = normalize_spaces(seg.text_en)
+
+            self._t5gemma_segment_prompt_texts[segno] = prompt_text
+
+            segment_meta[str(segno)] = {
+                "prompt_text": prompt_text,
+                "ref_start": seg.start,
+                "ref_end": effective_end,
+            }
+
+        # メタデータを保存する（再開用）
+        self._save_t5gemma_segment_meta(segment_meta)
+
+        generated = len(self._t5gemma_segment_refs)
+        print_step(
+            f"  T5Gemma セグメント単位リファレンス生成: "
+            f"{generated}/{len(segments)} 件"
+        )
+
+    def reload_t5gemma_segment_references(self, total_segments: int) -> None:
+        """再開時にキャッシュ済み T5Gemma セグメント単位リファレンスを検出してロードする。"""
+        seg_ref_dir = self._cache_dir / "t5gemma_segment_refs"
+        if not seg_ref_dir.exists():
+            return
+        for segno in range(1, total_segments + 1):
+            wav_path = seg_ref_dir / f"t5seg_ref_{segno:05d}.wav"
+            if wav_path.exists():
+                self._t5gemma_segment_refs[segno] = wav_path
+        # メタデータも読み込む
+        self._load_t5gemma_segment_meta()
 
     def _save_gptsovits_prompt_meta(
         self, meta: Dict[str, Dict[str, str]]
@@ -446,6 +565,34 @@ class SpeakerReferenceCache:
                 info.get("prompt_text", "") or ""
             )
 
+    def _save_t5gemma_segment_meta(
+        self, meta: Dict[str, Dict[str, str | float]]
+    ) -> None:
+        """T5Gemma-TTS セグメント単位メタデータを保存する。"""
+        meta_path = self._cache_dir / "t5gemma_segment_meta.json"
+        existing = load_json_if_exists(meta_path)
+        if isinstance(existing, dict):
+            existing.update(meta)
+            meta = existing
+        atomic_write_json(meta_path, meta)
+
+    def _load_t5gemma_segment_meta(self) -> None:
+        """T5Gemma-TTS セグメント単位メタデータを読み込む。"""
+        meta_path = self._cache_dir / "t5gemma_segment_meta.json"
+        obj = load_json_if_exists(meta_path)
+        if not isinstance(obj, dict):
+            return
+        for segno_str, info in obj.items():
+            if not isinstance(info, dict):
+                continue
+            try:
+                segno = int(segno_str)
+            except (ValueError, TypeError):
+                continue
+            self._t5gemma_segment_prompt_texts[segno] = str(
+                info.get("prompt_text", "") or ""
+            )
+
     def clear(self) -> None:
         """キャッシュをクリアしてメモリを解放する。"""
         self._refs.clear()
@@ -455,6 +602,8 @@ class SpeakerReferenceCache:
         self._gptsovits_prompt_langs.clear()
         self._t5gemma_refs.clear()
         self._t5gemma_prompt_texts.clear()
+        self._t5gemma_segment_refs.clear()
+        self._t5gemma_segment_prompt_texts.clear()
         gc.collect()
 
 

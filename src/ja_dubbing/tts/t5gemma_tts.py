@@ -3,6 +3,7 @@
 """
 T5Gemma-TTS による音声合成処理。
 ボイスクローンと再生時間制御をサポートし、外部サーバー不要で動作する。
+セグメント単位リファレンスを優先し、なければ話者代表リファレンスにフォールバックする。
 """
 
 from __future__ import annotations
@@ -924,7 +925,11 @@ def generate_segment_tts_t5gemma(
     ref_cache: SpeakerReferenceCache,
     segno: int = 0,
 ) -> Optional[TtsMeta]:
-    """T5Gemma-TTS でセグメントのボイスクローン音声を生成する。"""
+    """T5Gemma-TTS でセグメントのボイスクローン音声を生成する。
+
+    セグメント単位リファレンスを優先し、なければ話者代表リファレンスにフォールバックする。
+    セグメント単位リファレンスでは、ASR で再文字起こしした正確なテキストを使用する。
+    """
     if seg.duration < MIN_SEGMENT_SEC:
         return None
 
@@ -942,14 +947,21 @@ def generate_segment_tts_t5gemma(
                 duration_sec=float(duration),
             )
 
-    reference_speech = ref_cache.get_t5gemma_reference_path(seg.speaker_id)
+    # セグメント単位リファレンスを優先、なければ話者代表にフォールバック
+    seg_ref_path = ref_cache.get_t5gemma_segment_reference_path(segno)
+    if seg_ref_path is not None:
+        reference_speech = seg_ref_path
+        reference_text = ref_cache.get_t5gemma_segment_prompt_text(segno)
+    else:
+        reference_speech = ref_cache.get_t5gemma_reference_path(seg.speaker_id)
+        reference_text = ref_cache.get_t5gemma_prompt_text(seg.speaker_id)
+
     if reference_speech is None:
         print_step(
             f"    警告: 話者 {seg.speaker_id} の T5Gemma リファレンスがありません。"
         )
         return None
 
-    reference_text = ref_cache.get_t5gemma_prompt_text(seg.speaker_id)
     target_duration = max(seg.duration * T5GEMMA_DURATION_SCALE, _MIN_DURATION_SEC)
 
     tmp_wav = out_audio_stub.with_suffix(".t5gemma.wav")
