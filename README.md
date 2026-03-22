@@ -286,7 +286,7 @@ uv run ja-dubbing
 | `MIOTTS_LLM_TEMPERATURE` | `0.5` | 温度（低いほど安定、0.1〜0.8） |
 | `MIOTTS_LLM_REPETITION_PENALTY` | `1.1` | 繰り返し抑制（1.0〜1.3 推奨） |
 | `MIOTTS_LLM_FREQUENCY_PENALTY` | `0.3` | 高頻度トークン抑制（0.0〜1.0） |
-| `MIOTTS_QUALITY_RETRIES` | `1` | 品質バリデーション失敗時のリトライ回数 |
+| `MIOTTS_QUALITY_RETRIES` | `2` | 品質バリデーション失敗時のリトライ回数 |
 | `MIOTTS_DURATION_PER_CHAR_MAX` | `0.5` | 1文字あたり秒数の上限 |
 
 ### GPT-SoVITS 設定（`TTS_ENGINE=gptsovits`）
@@ -305,9 +305,9 @@ uv run ja-dubbing
 |------|-----------|------|
 | `T5GEMMA_MODEL_DIR` | `Aratako/T5Gemma-TTS-2b-2b` | モデルの HuggingFace リポジトリ |
 | `T5GEMMA_XCODEC2_MODEL` | `NandemoGHS/Anime-XCodec2-44.1kHz-v2` | 音声コーデックのリポジトリ |
-| `T5GEMMA_DURATION_SCALE` | `1.0` | 元セグメント長に掛ける倍率 |
+| `T5GEMMA_DURATION_SCALE` | `1.15` | 元セグメント長に掛ける倍率 |
 | `T5GEMMA_CPU_CODEC` | `true` | XCodec2 を CPU に逃がしてメモリを節約する |
-| `T5GEMMA_DURATION_TOLERANCE` | `0.3` | 生成音声長の許容ずれ率 |
+| `T5GEMMA_DURATION_TOLERANCE` | `0.5` | 生成音声長の許容ずれ率 |
 | `T5GEMMA_QUALITY_RETRIES` | `2` | 品質再生成の回数 |
 
 `T5Gemma-TTS` は、翻訳前に得た英語文字起こし (`text_en`) をそのまま Reference Text として使います。参照音声の再文字起こしはしません。
