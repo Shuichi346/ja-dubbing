@@ -22,29 +22,42 @@ WHISPER_DIR="$PROJECT_ROOT/whisper.cpp"
 WHISPER_MODEL="${WHISPER_MODEL:-large-v3-turbo}"
 VAD_MODEL="${VAD_MODEL:-silero-v6.2.0}"
 
+# Apple Silicon 判定
+IS_APPLE_SILICON=false
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+  IS_APPLE_SILICON=true
+fi
+
 echo "=== whisper.cpp セットアップ ==="
 echo "プロジェクトルート: $PROJECT_ROOT"
 echo "Whisper モデル: $WHISPER_MODEL"
 echo "VAD モデル: $VAD_MODEL"
+echo "Apple Silicon: $IS_APPLE_SILICON"
 echo ""
 
 # ---- 1. whisper.cpp クローン ----
 if [ -d "$WHISPER_DIR" ]; then
-    echo "1/4: whisper.cpp ディレクトリが既に存在します。更新します..."
+    echo "1/5: whisper.cpp ディレクトリが既に存在します。更新します..."
     cd "$WHISPER_DIR"
     git pull --ff-only || echo "  (git pull に失敗しましたが続行します)"
 else
-    echo "1/4: whisper.cpp をクローン中..."
+    echo "1/5: whisper.cpp をクローン中..."
     git clone https://github.com/ggml-org/whisper.cpp.git "$WHISPER_DIR"
     cd "$WHISPER_DIR"
 fi
 
 # ---- 2. CMake ビルド ----
 echo ""
-echo "2/4: CMake ビルド中..."
+echo "2/5: CMake ビルド中..."
 
-# Apple Silicon 用に Metal を有効化
-cmake -B build -DWHISPER_METAL=ON
+# Apple Silicon 用に Metal を有効化、Core ML が使える場合は追加で有効化
+CMAKE_OPTIONS=(-DWHISPER_METAL=ON)
+if [[ "$IS_APPLE_SILICON" == true ]]; then
+    CMAKE_OPTIONS+=(-DWHISPER_COREML=1)
+    echo "  Core ML サポートを有効にしてビルドします。"
+fi
+
+cmake -B build "${CMAKE_OPTIONS[@]}"
 cmake --build build -j --config Release
 
 # ビルド結果の確認
@@ -58,7 +71,7 @@ echo "  ビルド完了: $WHISPER_CLI"
 
 # ---- 3. Whisper モデルダウンロード ----
 echo ""
-echo "3/4: Whisper モデルをダウンロード中 ($WHISPER_MODEL)..."
+echo "3/5: Whisper モデルをダウンロード中 ($WHISPER_MODEL)..."
 
 MODEL_FILE="$WHISPER_DIR/models/ggml-${WHISPER_MODEL}.bin"
 if [ -f "$MODEL_FILE" ]; then
@@ -74,7 +87,7 @@ fi
 
 # ---- 4. VAD モデルダウンロード ----
 echo ""
-echo "4/4: VAD モデルをダウンロード中 ($VAD_MODEL)..."
+echo "4/5: VAD モデルをダウンロード中 ($VAD_MODEL)..."
 
 VAD_FILE="$WHISPER_DIR/models/ggml-${VAD_MODEL}.bin"
 if [ -f "$VAD_FILE" ]; then
@@ -88,12 +101,49 @@ else
     echo "  ダウンロード完了: $VAD_FILE"
 fi
 
+# ---- 5. Core ML エンコーダーモデルのダウンロード（Apple Silicon のみ） ----
+echo ""
+if [[ "$IS_APPLE_SILICON" == true ]]; then
+    echo "5/5: Core ML エンコーダーモデルを準備中 ($WHISPER_MODEL)..."
+
+    COREML_DIR="$WHISPER_DIR/models/ggml-${WHISPER_MODEL}-encoder.mlmodelc"
+
+    if [ -d "$COREML_DIR" ]; then
+        echo "  Core ML モデルは既に存在します: $COREML_DIR"
+    else
+        COREML_ZIP="$WHISPER_DIR/models/ggml-${WHISPER_MODEL}-encoder.mlmodelc.zip"
+        COREML_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}-encoder.mlmodelc.zip"
+
+        echo "  ダウンロード中: $COREML_URL"
+        curl -L -o "$COREML_ZIP" "$COREML_URL"
+
+        echo "  展開中..."
+        unzip -o "$COREML_ZIP" -d "$WHISPER_DIR/models/"
+        rm -f "$COREML_ZIP"
+
+        if [ ! -d "$COREML_DIR" ]; then
+            echo "エラー: Core ML モデルの展開に失敗しました。"
+            exit 1
+        fi
+        echo "  ダウンロード完了: $COREML_DIR"
+    fi
+
+    echo ""
+    echo "  ※ Core ML モデルの初回実行時は ANE がコンパイルを行うため数分かかります。"
+    echo "    2回目以降はキャッシュが使われるため高速に起動します。"
+else
+    echo "5/5: Core ML エンコーダーモデル → スキップ（Apple Silicon ではありません）"
+fi
+
 echo ""
 echo "=== セットアップ完了 ==="
 echo ""
 echo "whisper-cli: $WHISPER_CLI"
 echo "Whisper モデル: $MODEL_FILE"
 echo "VAD モデル: $VAD_FILE"
+if [[ "$IS_APPLE_SILICON" == true ]]; then
+    echo "Core ML モデル: $WHISPER_DIR/models/ggml-${WHISPER_MODEL}-encoder.mlmodelc"
+fi
 echo ""
 echo "テスト実行:"
 echo "  $WHISPER_CLI -m $MODEL_FILE --vad -vm $VAD_FILE -f samples/jfk.wav"
