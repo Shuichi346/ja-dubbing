@@ -114,7 +114,7 @@ chmod +x scripts/setup_whisper.sh
 
 1. https://huggingface.co/settings/tokens でトークンを作成（`Read` 権限）
 2. 以下の2つのページで**利用規約に同意**する（即時承認されます）
-   - https://huggingface.co/pyannote/speaker-diarization-3.1
+   - https://huggingface.co/pyannote/speaker-diarization-community-1
    - https://huggingface.co/pyannote/segmentation-3.0
 
 #### VibeVoice モードの場合（`ASR_ENGINE=vibevoice`）

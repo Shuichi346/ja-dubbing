@@ -114,7 +114,7 @@ chmod +x scripts/setup_whisper.sh
 
 1. Create a token at https://huggingface.co/settings/tokens (`Read` permission)
 2. **Accept the terms of use** on the following 2 pages (instantly approved)
-   - https://huggingface.co/pyannote/speaker-diarization-3.1
+   - https://huggingface.co/pyannote/speaker-diarization-community-1
    - https://huggingface.co/pyannote/segmentation-3.0
 
 #### For VibeVoice Mode (`ASR_ENGINE=vibevoice`)

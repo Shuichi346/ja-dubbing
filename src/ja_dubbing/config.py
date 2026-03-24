@@ -104,7 +104,7 @@ VIBEVOICE_MEMORY_LIMIT_RATIO = _env_float("VIBEVOICE_MEMORY_LIMIT_RATIO", 0.90)
 # =========================
 
 HF_AUTH_TOKEN = _env("HF_AUTH_TOKEN", "")
-PYANNOTE_MODEL = _env("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1")
+PYANNOTE_MODEL = _env("PYANNOTE_MODEL", "pyannote/speaker-diarization-community-1")
 
 # =========================
 # CAT-Translate（英日翻訳）
