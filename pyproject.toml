@@ -2,7 +2,7 @@
 name = "ja-dubbing"
 version = "6.0.0"
 description = "英語動画を話者音声クローン付き日本語吹き替え動画に変換"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "pip",
     "python-dotenv>=1.0.0",
@@ -50,7 +50,7 @@ override-dependencies = [
 
 [tool.ruff]
 line-length = 99
-target-version = "py311"
+target-version = "py313"
 src = ["src"]
 
 [tool.ruff.lint]
