@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 pyannote.audioによる話者分離処理。
-macOS torchcodec互換回避済み。
+mac torchcodec を使用した音声読み込みに対応。
 pyannote.audio 4.x の DiarizeOutput API に対応。
 """
 
@@ -38,18 +38,63 @@ def _get_pipeline():
             "HF_AUTH_TOKEN が未設定です。.env に HuggingFace トークンを設定してください。"
         )
 
-    # pyannote.audioのバージョンによりパラメータ名が異なる場合を考慮
-    try:
-        _PIPELINE = Pipeline.from_pretrained(
-            PYANNOTE_MODEL,
-            token=HF_AUTH_TOKEN,
-        )
-    except TypeError:
-        _PIPELINE = Pipeline.from_pretrained(
-            PYANNOTE_MODEL,
-            token=HF_AUTH_TOKEN,
-        )
+    _PIPELINE = Pipeline.from_pretrained(
+        PYANNOTE_MODEL,
+        token=HF_AUTH_TOKEN,
+    )
     return _PIPELINE
+
+
+def _load_audio_waveform(wav_path: Path):
+    """音声ファイルを waveform テンソルとして読み込む。
+
+    torchcodec（推奨） → torchaudio（フォールバック）→ soundfile の順に試行する。
+    """
+    import torch
+
+    # 方法1: torchcodec（推奨、torchaudio 非推奨 API を回避）
+    try:
+        from torchcodec.decoders import AudioDecoder
+
+        decoder = AudioDecoder(str(wav_path))
+        result = decoder.decode()
+        waveform = result.data     # (channels, samples)
+        sample_rate = result.sample_rate
+        # float32 に変換する（torchcodec は PCM int で返す場合がある）
+        if waveform.dtype != torch.float32:
+            waveform = waveform.to(torch.float32)
+            # int16/int32 の場合はスケーリングする
+            if waveform.abs().max() > 1.0:
+                waveform = waveform / 32768.0
+        return waveform, int(sample_rate)
+    except Exception:
+        pass
+
+    # 方法2: torchaudio（2.8 では非推奨だがまだ動作する）
+    try:
+        import torchaudio
+        waveform, sample_rate = torchaudio.load(str(wav_path))
+        return waveform, int(sample_rate)
+    except Exception:
+        pass
+
+    # 方法3: soundfile + torch（最終フォールバック）
+    try:
+        import soundfile as sf
+        import numpy as np
+
+        data, sample_rate = sf.read(str(wav_path), dtype="float32")
+        if data.ndim == 1:
+            data = data[np.newaxis, :]  # (1, T)
+        else:
+            data = data.T  # (T, C) → (C, T)
+        waveform = torch.from_numpy(data)
+        return waveform, int(sample_rate)
+    except Exception as exc:
+        raise PipelineError(
+            f"音声ファイルを読み込めません: {wav_path}\n"
+            "torchcodec / torchaudio / soundfile のいずれも利用できません。"
+        ) from exc
 
 
 def _extract_annotation(raw_output):
@@ -73,13 +118,10 @@ def _extract_annotation(raw_output):
 
 
 def run_diarization(wav_path: Path) -> List[DiarizationSegment]:
-    """話者分離を実行する。macOS torchcodec互換回避済み。"""
-    import torchaudio
-
+    """話者分離を実行する。torchcodec 対応済み。"""
     pipeline = _get_pipeline()
 
-    # macOS (brew ffmpeg) での torchcodec 不整合を回避
-    waveform, sample_rate = torchaudio.load(str(wav_path))
+    waveform, sample_rate = _load_audio_waveform(wav_path)
     print_step(f"  話者分離: waveform shape={waveform.shape}, sr={sample_rate}")
 
     raw_output = pipeline({"waveform": waveform, "sample_rate": sample_rate})
@@ -120,7 +162,6 @@ def release_pipeline() -> None:
 
     gc.collect()
 
-    # PyTorch MPS メモリキャッシュを明示的に解放する
     try:
         import torch
         if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):

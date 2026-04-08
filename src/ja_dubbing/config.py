@@ -75,6 +75,9 @@ VAD_MODEL = _env("VAD_MODEL", "silero-v6.2.0")
 
 WHISPER_CPP_DIR = Path(_env("WHISPER_CPP_DIR", "./whisper.cpp"))
 
+# whisper.cpp のネイティブサンプリングレート（16kHz 固定）
+WHISPER_SAMPLE_RATE = 16000
+
 # =========================
 # VibeVoice-ASR
 # =========================
@@ -82,6 +85,9 @@ WHISPER_CPP_DIR = Path(_env("WHISPER_CPP_DIR", "./whisper.cpp"))
 VIBEVOICE_MODEL = _env("VIBEVOICE_MODEL", "mlx-community/VibeVoice-ASR-8bit")
 VIBEVOICE_MAX_TOKENS = _env_int("VIBEVOICE_MAX_TOKENS", 32768)
 VIBEVOICE_CONTEXT = _env("VIBEVOICE_CONTEXT", "")
+
+# VibeVoice-ASR のネイティブサンプリングレート（24kHz）
+VIBEVOICE_SAMPLE_RATE = 24000
 
 VIBEVOICE_CHUNK_REFERENCE_AVAILABLE_GB = _env_float(
     "VIBEVOICE_CHUNK_REFERENCE_AVAILABLE_GB", 14.0
@@ -130,6 +136,9 @@ KOKORO_MODEL = _env("KOKORO_MODEL", "kokoro")
 KOKORO_VOICE = _env("KOKORO_VOICE", "jf_alpha")
 KOKORO_SPEED = _env_float("KOKORO_SPEED", 1.0)
 
+# Kokoro のネイティブサンプリングレート（24kHz 固定）
+KOKORO_SAMPLE_RATE = 24000
+
 # =========================
 # OmniVoice（ボイスクローン + 再生時間制御）
 # =========================
@@ -153,11 +162,11 @@ OMNIVOICE_REFERENCE_TARGET_SEC = _env_float("OMNIVOICE_REFERENCE_TARGET_SEC", 8.
 OMNIVOICE_DURATION_TOLERANCE = _env_float("OMNIVOICE_DURATION_TOLERANCE", 0.5)
 # 品質リトライ回数
 OMNIVOICE_QUALITY_RETRIES = _env_int("OMNIVOICE_QUALITY_RETRIES", 2)
-# 出力音声のサンプルレート（OmniVoice のネイティブは 24kHz）
+# OmniVoice のネイティブサンプリングレート（24kHz）
 OMNIVOICE_SAMPLE_RATE = 24000
 
 # =========================
-# 音声設定
+# 音声設定（最終出力ミックス用）
 # =========================
 
 TTS_SAMPLE_RATE = _env_int("TTS_SAMPLE_RATE", 48000)

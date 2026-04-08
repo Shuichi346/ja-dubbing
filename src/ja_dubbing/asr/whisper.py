@@ -17,6 +17,7 @@ from ja_dubbing.config import (
     WHISPER_CPP_DIR,
     WHISPER_LANG,
     WHISPER_MODEL,
+    WHISPER_SAMPLE_RATE,
 )
 from ja_dubbing.core.models import Segment
 from ja_dubbing.utils import PipelineError, print_step, run_cmd, which_or_raise
@@ -68,12 +69,27 @@ def _resolve_vad_model() -> str:
 
 
 def extract_wav_for_whisper(video_path: Path, wav_path: Path) -> None:
-    """動画から16kHz mono WAVを抽出する。"""
+    """動画から16kHz mono WAVを抽出する（whisper.cpp 用）。"""
     which_or_raise("ffmpeg")
     cmd = [
         "ffmpeg", "-y",
         "-i", str(video_path),
-        "-vn", "-ac", "1", "-ar", "16000",
+        "-vn", "-ac", "1", "-ar", str(WHISPER_SAMPLE_RATE),
+        "-c:a", "pcm_s16le",
+        str(wav_path),
+    ]
+    run_cmd(cmd)
+
+
+def extract_wav_for_vibevoice(video_path: Path, wav_path: Path) -> None:
+    """動画から24kHz mono WAVを抽出する（VibeVoice-ASR 用）。"""
+    from ja_dubbing.config import VIBEVOICE_SAMPLE_RATE
+
+    which_or_raise("ffmpeg")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vn", "-ac", "1", "-ar", str(VIBEVOICE_SAMPLE_RATE),
         "-c:a", "pcm_s16le",
         str(wav_path),
     ]
@@ -176,7 +192,7 @@ def transcribe_short_audio(wav_path: Path, language: str = "") -> str:
         run_cmd([
             "ffmpeg", "-y",
             "-i", str(wav_path),
-            "-vn", "-ac", "1", "-ar", "16000",
+            "-vn", "-ac", "1", "-ar", str(WHISPER_SAMPLE_RATE),
             "-c:a", "pcm_s16le",
             str(tmp_wav),
         ])

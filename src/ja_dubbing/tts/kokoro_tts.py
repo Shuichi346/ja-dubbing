@@ -17,6 +17,7 @@ import numpy as np
 from ja_dubbing.audio.ffmpeg import ffprobe_duration_sec
 from ja_dubbing.config import (
     KOKORO_MODEL,
+    KOKORO_SAMPLE_RATE,
     KOKORO_SPEED,
     KOKORO_VOICE,
     MIN_SEGMENT_SEC,
@@ -33,9 +34,6 @@ from ja_dubbing.utils import (
     which_or_raise,
 )
 
-# Kokoro のネイティブサンプリングレート（24kHz固定）
-_KOKORO_SAMPLE_RATE = 24000
-
 # パイプラインの遅延ロード用グローバルキャッシュ
 _KOKORO_PIPELINE = None
 
@@ -46,7 +44,6 @@ def _get_kokoro_pipeline():
     if _KOKORO_PIPELINE is not None:
         return _KOKORO_PIPELINE
 
-    # Apple Silicon MPS フォールバックを有効化
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
     try:
@@ -60,10 +57,7 @@ def _get_kokoro_pipeline():
         ) from exc
 
     print_step(f"  Kokoro TTS パイプライン初期化中: model={KOKORO_MODEL}, voice={KOKORO_VOICE}")
-
-    # lang_code='j' で日本語モード
     _KOKORO_PIPELINE = KPipeline(lang_code="j", model=KOKORO_MODEL)
-
     print_step("  Kokoro TTS パイプライン初期化完了")
     return _KOKORO_PIPELINE
 
@@ -73,7 +67,6 @@ def ensure_unidic_downloaded() -> None:
     try:
         import unidic
         dicdir = unidic.DICDIR
-        # 辞書ディレクトリが存在し、中にファイルがあるかチェック
         if Path(dicdir).exists() and any(Path(dicdir).iterdir()):
             return
     except (ImportError, AttributeError, TypeError):
@@ -101,8 +94,6 @@ def kokoro_synthesize_to_wav(text_ja: str, out_wav: Path) -> bool:
             "  uv sync を実行してください。\n"
         ) from exc
 
-    # Kokoro はジェネレータとして音声を返す
-    # 全チャンクを結合して1つのWAVにする
     audio_chunks: list = []
     try:
         generator = pipeline(
@@ -112,7 +103,6 @@ def kokoro_synthesize_to_wav(text_ja: str, out_wav: Path) -> bool:
         )
         for _gs, _ps, audio in generator:
             if audio is not None and len(audio) > 0:
-                # audio は numpy array または torch tensor
                 if hasattr(audio, "numpy"):
                     audio = audio.numpy()
                 audio_chunks.append(audio)
@@ -122,14 +112,12 @@ def kokoro_synthesize_to_wav(text_ja: str, out_wav: Path) -> bool:
     if not audio_chunks:
         return False
 
-    # 全チャンクを結合
     full_audio = np.concatenate(audio_chunks)
 
     if len(full_audio) == 0:
         return False
 
-    # Kokoro のネイティブレート（24kHz）で出力
-    sf.write(str(out_wav), full_audio, _KOKORO_SAMPLE_RATE)
+    sf.write(str(out_wav), full_audio, KOKORO_SAMPLE_RATE)
     return True
 
 
@@ -163,7 +151,6 @@ def generate_segment_tts_kokoro(
 
     out_flac = out_audio_stub.with_suffix(".flac")
 
-    # 既存のFLACがあればそれを使う
     if out_flac.exists():
         dur = ffprobe_duration_sec(out_flac)
         if dur > 0:

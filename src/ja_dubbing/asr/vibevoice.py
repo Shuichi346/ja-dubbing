@@ -27,6 +27,7 @@ from ja_dubbing.config import (
     VIBEVOICE_MEMORY_LIMIT_RATIO,
     VIBEVOICE_MODEL,
     VIBEVOICE_PREFILL_STEP_SIZE,
+    VIBEVOICE_SAMPLE_RATE,
 )
 from ja_dubbing.core.models import DiarizationSegment, Segment
 from ja_dubbing.utils import PipelineError, print_step
@@ -37,8 +38,8 @@ _VIBEVOICE_MODEL = None
 # 非音声タグのパターン（[Music], [Noise], [Environmental Sounds], [Speech] など）
 _NON_SPEECH_PATTERN = re.compile(r"^\[.*\]$")
 
-# VibeVoice エンコーダの定数
-_SAMPLE_RATE = 24000
+# VibeVoice エンコーダの定数（VIBEVOICE_SAMPLE_RATE は config.py で定義）
+_SAMPLE_RATE = VIBEVOICE_SAMPLE_RATE
 _HOP_LENGTH = 3200
 
 
@@ -74,7 +75,6 @@ def _get_vibevoice_model():
 
     import mlx.core as mx
 
-    # GPU 最大推奨サイズの指定割合をメモリ上限に設定（OS 分を確保）
     device_info = mx.device_info()
     max_recommended = device_info["max_recommended_working_set_size"]
     memory_limit = int(max_recommended * VIBEVOICE_MEMORY_LIMIT_RATIO)
@@ -175,13 +175,11 @@ def _chunked_encode_speech(model, audio_tensor, chunk_seconds: int) -> "mx.array
             f"{chunk_dur:.0f}秒)"
         )
 
-        # batch + channel 次元を追加 [B, T] → [B, 1, T]
         if chunk.ndim == 2:
             chunk_3d = chunk[:, None, :]
         else:
             chunk_3d = chunk
 
-        # Acoustic エンコード
         acoustic_tokens = model.acoustic_tokenizer.encode(chunk_3d)
         mx.eval(acoustic_tokens)
         acoustic_feat = model.acoustic_connector(acoustic_tokens)
@@ -190,7 +188,6 @@ def _chunked_encode_speech(model, audio_tensor, chunk_seconds: int) -> "mx.array
         mx.metal.clear_cache()
         acoustic_features_list.append(acoustic_feat)
 
-        # Semantic エンコード
         semantic_tokens = model.semantic_tokenizer.encode(chunk_3d)
         mx.eval(semantic_tokens)
         semantic_feat = model.semantic_connector(semantic_tokens)
@@ -205,7 +202,6 @@ def _chunked_encode_speech(model, audio_tensor, chunk_seconds: int) -> "mx.array
         )
         gc.collect()
 
-    # 全チャンクの特徴量を時間軸方向に結合
     print_step("    特徴量結合中...")
     all_acoustic = mx.concatenate(acoustic_features_list, axis=1)
     mx.eval(all_acoustic)
@@ -255,7 +251,6 @@ def _generate_with_precomputed_features(
         f"特徴量トークン数={speech_features.shape[1]}"
     )
 
-    # プロンプト構築
     input_ids, acoustic_input_mask = model._build_prompt_tokens(
         speech_features, audio_duration, context
     )
@@ -348,7 +343,6 @@ def vibevoice_transcribe(
     if VIBEVOICE_CONTEXT.strip():
         print_step(f"    context={VIBEVOICE_CONTEXT.strip()}")
 
-    # 音声の長さを推定してチャンクエンコードの要否を判定する
     import mlx.core as mx
 
     available_gb = _get_available_memory_gb()
@@ -358,14 +352,12 @@ def vibevoice_transcribe(
         f"    推奨チャンクサイズ: {chunk_seconds}秒 ({chunk_seconds / 60:.1f}分)"
     )
 
-    # 音声を前処理してサンプル数から長さを判定
     audio_tensor = model._preprocess_audio(str(wav_path))
     audio_duration = audio_tensor.shape[1] / _SAMPLE_RATE
     print_step(
         f"    音声長: {audio_duration:.1f}秒 ({audio_duration / 60:.1f}分)"
     )
 
-    # チャンクサイズより短い場合は通常の generate() を使用
     if audio_duration <= chunk_seconds:
         print_step("    通常の generate() を使用（音声がチャンクサイズ以下）")
         del audio_tensor
@@ -374,13 +366,11 @@ def vibevoice_transcribe(
 
         result = _generate_standard(model, wav_path)
     else:
-        # チャンクエンコード方式（メモリ最適化）
         print_step("    チャンクエンコード方式でメモリ最適化実行")
         speech_features = _chunked_encode_speech(
             model, audio_tensor, chunk_seconds
         )
 
-        # 音声テンソルはもう不要
         del audio_tensor
         mx.metal.clear_cache()
         gc.collect()
@@ -394,7 +384,6 @@ def vibevoice_transcribe(
         mx.metal.clear_cache()
         gc.collect()
 
-    # result からセグメントと話者分離情報を抽出する
     if isinstance(result, dict):
         raw_segments = result.get("segments", [])
     else:
