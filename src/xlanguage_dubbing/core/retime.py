@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
-from ja_dubbing.core.models import RetimePart, Segment, TtsMeta
+from xlanguage_dubbing.core.models import RetimePart, Segment, TtsMeta
 
 # 映像チャンクとして成立しない極端に短い区間の閾値（秒）
 _MIN_CHUNK_SEC = 0.15

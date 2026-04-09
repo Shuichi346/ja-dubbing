@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from ja_dubbing.utils import atomic_write_json, load_json_if_exists, print_step
+from xlanguage_dubbing.utils import atomic_write_json, load_json_if_exists, print_step
 
 
 def video_signature(video_path: Path) -> Dict[str, Any]:

@@ -9,13 +9,13 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     MERGE_FORCE_IF_VERY_SHORT_SEC,
     MERGE_GAP_SEC,
     MERGE_MAX_CHARS,
     MERGE_MAX_SEC,
 )
-from ja_dubbing.core.models import Segment
+from xlanguage_dubbing.core.models import Segment
 
 
 def _ends_sentence(text: str) -> bool:

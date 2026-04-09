@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ja_dubbing.utils import print_step
+from xlanguage_dubbing.utils import print_step
 
 
 def preflight_server_checks() -> None:

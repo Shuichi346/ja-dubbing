@@ -17,8 +17,8 @@ from typing import Optional
 
 import torch
 
-from ja_dubbing.audio.ffmpeg import ffprobe_duration_sec
-from ja_dubbing.config import (
+from xlanguage_dubbing.audio.ffmpeg import ffprobe_duration_sec
+from xlanguage_dubbing.config import (
     MIN_SEGMENT_SEC,
     OMNIVOICE_DURATION_SCALE,
     OMNIVOICE_DURATION_TOLERANCE,
@@ -32,9 +32,9 @@ from ja_dubbing.config import (
     TTS_CHANNELS,
     TTS_SAMPLE_RATE,
 )
-from ja_dubbing.core.models import Segment, TtsMeta
-from ja_dubbing.tts.reference import SpeakerReferenceCache
-from ja_dubbing.utils import (
+from xlanguage_dubbing.core.models import Segment, TtsMeta
+from xlanguage_dubbing.tts.reference import SpeakerReferenceCache
+from xlanguage_dubbing.utils import (
     PipelineError,
     ensure_dir,
     print_step,
@@ -340,7 +340,7 @@ def generate_segment_tts_omnivoice(
 
 def load_tts_meta(path: Path) -> dict[int, TtsMeta]:
     """TTSメタ情報を読み込む。"""
-    from ja_dubbing.utils import load_json_if_exists
+    from xlanguage_dubbing.utils import load_json_if_exists
 
     obj = load_json_if_exists(path)
     if not isinstance(obj, list):
@@ -360,7 +360,7 @@ def load_tts_meta(path: Path) -> dict[int, TtsMeta]:
 
 def save_tts_meta_atomic(path: Path, meta: dict[int, TtsMeta]) -> None:
     """TTSメタ情報をアトミックに保存する。"""
-    from ja_dubbing.utils import atomic_write_json
+    from xlanguage_dubbing.utils import atomic_write_json
 
     rows: list[dict] = []
     for segno in sorted(meta.keys()):

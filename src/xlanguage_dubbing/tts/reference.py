@@ -14,14 +14,14 @@ from typing import Dict, List, Optional, Set
 
 from pydub import AudioSegment
 
-from ja_dubbing.audio.ffmpeg import extract_audio_segment
-from ja_dubbing.config import (
+from xlanguage_dubbing.audio.ffmpeg import extract_audio_segment
+from xlanguage_dubbing.config import (
     OMNIVOICE_REFERENCE_MAX_SEC,
     OMNIVOICE_REFERENCE_MIN_SEC,
     OMNIVOICE_REFERENCE_TARGET_SEC,
 )
-from ja_dubbing.core.models import DiarizationSegment, Segment
-from ja_dubbing.utils import (
+from xlanguage_dubbing.core.models import DiarizationSegment, Segment
+from xlanguage_dubbing.utils import (
     atomic_write_json,
     ensure_dir,
     load_json_if_exists,
@@ -96,7 +96,7 @@ class SpeakerReferenceCache:
         話者代表リファレンスは各話者から1つだけ選ぶ代表音声であり、
         ASR での再文字起こしを使って参照テキストの精度を高める。
         """
-        from ja_dubbing.asr import transcribe_reference_audio
+        from xlanguage_dubbing.asr import transcribe_reference_audio
 
         speakers: Dict[str, List[DiarizationSegment]] = {}
         for dia in diarization:

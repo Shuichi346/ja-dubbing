@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ja_dubbing.config import ASR_ENGINE
+from xlanguage_dubbing.config import ASR_ENGINE
 
 
 def get_asr_engine() -> str:
@@ -25,8 +25,8 @@ def transcribe_reference_audio(wav_path: Path, language: str = "") -> str:
     engine = get_asr_engine()
 
     if engine == "vibevoice":
-        from ja_dubbing.asr.vibevoice import transcribe_short_audio_vibevoice
+        from xlanguage_dubbing.asr.vibevoice import transcribe_short_audio_vibevoice
         return transcribe_short_audio_vibevoice(wav_path)
 
-    from ja_dubbing.asr.whisper import transcribe_short_audio
+    from xlanguage_dubbing.asr.whisper import transcribe_short_audio
     return transcribe_short_audio(wav_path, language=language)

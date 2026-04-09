@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from ja_dubbing.core.models import Segment
-from ja_dubbing.utils import normalize_spaces
+from xlanguage_dubbing.core.models import Segment
+from xlanguage_dubbing.utils import normalize_spaces
 
 
 def merge_sentence_units(

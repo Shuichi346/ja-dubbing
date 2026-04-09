@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     VIBEVOICE_CHUNK_MAX_SECONDS,
     VIBEVOICE_CHUNK_MIN_SECONDS,
     VIBEVOICE_CHUNK_REFERENCE_AVAILABLE_GB,
@@ -29,8 +29,8 @@ from ja_dubbing.config import (
     VIBEVOICE_PREFILL_STEP_SIZE,
     VIBEVOICE_SAMPLE_RATE,
 )
-from ja_dubbing.core.models import DiarizationSegment, Segment
-from ja_dubbing.utils import PipelineError, print_step
+from xlanguage_dubbing.core.models import DiarizationSegment, Segment
+from xlanguage_dubbing.utils import PipelineError, print_step
 
 # モデルの遅延ロード用グローバルキャッシュ
 _VIBEVOICE_MODEL = None

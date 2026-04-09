@@ -12,13 +12,13 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-from ja_dubbing.config import TEMP_ROOT, VIDEO_EXTS, VIDEO_FOLDER
-from ja_dubbing.core.pipeline import process_one_video
-from ja_dubbing.segments.spacy_split import initialize_spacy
-from ja_dubbing.servers.health import generate_start_script
-from ja_dubbing.translation.cat_translate import CatTranslateClient
-from ja_dubbing.tts.reference import SpeakerReferenceCache
-from ja_dubbing.utils import (
+from xlanguage_dubbing.config import TEMP_ROOT, VIDEO_EXTS, VIDEO_FOLDER
+from xlanguage_dubbing.core.pipeline import process_one_video
+from xlanguage_dubbing.segments.spacy_split import initialize_spacy
+from xlanguage_dubbing.servers.health import generate_start_script
+from xlanguage_dubbing.translation.cat_translate import CatTranslateClient
+from xlanguage_dubbing.tts.reference import SpeakerReferenceCache
+from xlanguage_dubbing.utils import (
     PipelineError,
     ensure_dir,
     force_memory_cleanup,

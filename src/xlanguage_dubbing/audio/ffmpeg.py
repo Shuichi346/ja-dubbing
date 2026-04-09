@@ -9,14 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     ENGLISH_VOLUME,
     JAPANESE_VOLUME,
     OUTPUT_SIZE,
     TTS_CHANNELS,
     TTS_SAMPLE_RATE,
 )
-from ja_dubbing.utils import (
+from xlanguage_dubbing.utils import (
     PipelineError,
     atomic_write_text,
     ensure_dir,

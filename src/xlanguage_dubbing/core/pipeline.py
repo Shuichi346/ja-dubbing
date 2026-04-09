@@ -12,9 +12,9 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from ja_dubbing.asr import get_asr_engine
-from ja_dubbing.asr.whisper import extract_wav_for_whisper
-from ja_dubbing.audio.ffmpeg import (
+from xlanguage_dubbing.asr import get_asr_engine
+from xlanguage_dubbing.asr.whisper import extract_wav_for_whisper
+from xlanguage_dubbing.audio.ffmpeg import (
     concat_audio_to_flac,
     concat_ts_files,
     create_silence_flac,
@@ -25,12 +25,12 @@ from ja_dubbing.audio.ffmpeg import (
     mux_retimed_video_with_tracks,
     remux_ts_to_mp4,
 )
-from ja_dubbing.audio.segment_io import (
+from xlanguage_dubbing.audio.segment_io import (
     load_segments_json,
     save_segments_json_atomic,
     save_srt_atomic,
 )
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     KEEP_TEMP,
     MIN_SEGMENT_SEC,
     OUTPUT_SUFFIX,
@@ -41,25 +41,25 @@ from ja_dubbing.config import (
     SPACY_UNIT_MERGE_MAX_CHARS,
     SPACY_UNIT_MERGE_MAX_GAP_SEC,
 )
-from ja_dubbing.core.models import TtsMeta
-from ja_dubbing.core.progress import ProgressStore
-from ja_dubbing.core.retime import build_retime_parts
-from ja_dubbing.segments.merge import merge_segments
-from ja_dubbing.segments.sentence import merge_sentence_units
-from ja_dubbing.segments.spacy_split import (
+from xlanguage_dubbing.core.models import TtsMeta
+from xlanguage_dubbing.core.progress import ProgressStore
+from xlanguage_dubbing.core.retime import build_retime_parts
+from xlanguage_dubbing.segments.merge import merge_segments
+from xlanguage_dubbing.segments.sentence import merge_sentence_units
+from xlanguage_dubbing.segments.spacy_split import (
     chunk_segments_for_spacy,
     split_segments_by_spacy_sentences,
 )
-from ja_dubbing.translation.cat_translate import (
+from xlanguage_dubbing.translation.cat_translate import (
     CatTranslateClient,
     translate_segments_resumable,
 )
-from ja_dubbing.omnivoice_tts import (
+from xlanguage_dubbing.omnivoice_tts import (
     load_tts_meta,
     save_tts_meta_atomic,
 )
-from ja_dubbing.tts.reference import SpeakerReferenceCache
-from ja_dubbing.utils import (
+from xlanguage_dubbing.tts.reference import SpeakerReferenceCache
+from xlanguage_dubbing.utils import (
     PipelineError,
     ensure_dir,
     force_memory_cleanup,
@@ -137,7 +137,7 @@ def process_one_video(
         diarization = None
     else:
         if asr_engine == "vibevoice":
-            from ja_dubbing.asr.vibevoice import (
+            from xlanguage_dubbing.asr.vibevoice import (
                 release_vibevoice_model,
                 vibevoice_transcribe,
             )
@@ -160,7 +160,7 @@ def process_one_video(
 
             segments_with_speaker = segments_raw
         else:
-            from ja_dubbing.asr.whisper import (
+            from xlanguage_dubbing.asr.whisper import (
                 release_whisper_model,
                 whisper_transcribe,
             )
@@ -177,8 +177,8 @@ def process_one_video(
             progress.set_artifact("asr_srt_en", str(srt_en_path))
             progress.save()
 
-            from ja_dubbing.diarization.alignment import assign_speakers
-            from ja_dubbing.diarization.speaker import (
+            from xlanguage_dubbing.diarization.alignment import assign_speakers
+            from xlanguage_dubbing.diarization.speaker import (
                 release_pipeline,
                 run_diarization,
             )
@@ -569,7 +569,7 @@ def _run_tts_omnivoice(
     ref_cache: SpeakerReferenceCache,
 ) -> None:
     """OmniVoice でボイスクローン日本語音声を生成する。"""
-    from ja_dubbing.omnivoice_tts import (
+    from xlanguage_dubbing.omnivoice_tts import (
         generate_segment_tts_omnivoice,
         release_omnivoice_model,
     )

@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from ja_dubbing.config import SPACY_MIN_WEIGHT, SPACY_MODEL
-from ja_dubbing.core.models import Segment
-from ja_dubbing.utils import PipelineError, normalize_spaces
+from xlanguage_dubbing.config import SPACY_MIN_WEIGHT, SPACY_MODEL
+from xlanguage_dubbing.core.models import Segment
+from xlanguage_dubbing.utils import PipelineError, normalize_spaces
 
 _SPACY_NLP = None
 

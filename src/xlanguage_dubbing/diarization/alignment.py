@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List
 
-from ja_dubbing.core.models import DiarizationSegment, Segment
+from xlanguage_dubbing.core.models import DiarizationSegment, Segment
 
 
 def assign_speakers(

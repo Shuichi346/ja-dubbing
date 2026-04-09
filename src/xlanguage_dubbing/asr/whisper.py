@@ -12,15 +12,15 @@ import os
 from pathlib import Path
 from typing import List
 
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     VAD_MODEL,
     WHISPER_CPP_DIR,
     WHISPER_LANG,
     WHISPER_MODEL,
     WHISPER_SAMPLE_RATE,
 )
-from ja_dubbing.core.models import Segment
-from ja_dubbing.utils import PipelineError, print_step, run_cmd, which_or_raise
+from xlanguage_dubbing.core.models import Segment
+from xlanguage_dubbing.utils import PipelineError, print_step, run_cmd, which_or_raise
 
 
 def _resolve_whisper_cli() -> str:
@@ -83,7 +83,7 @@ def extract_wav_for_whisper(video_path: Path, wav_path: Path) -> None:
 
 def extract_wav_for_vibevoice(video_path: Path, wav_path: Path) -> None:
     """動画から24kHz mono WAVを抽出する（VibeVoice-ASR 用）。"""
-    from ja_dubbing.config import VIBEVOICE_SAMPLE_RATE
+    from xlanguage_dubbing.config import VIBEVOICE_SAMPLE_RATE
 
     which_or_raise("ffmpeg")
     cmd = [

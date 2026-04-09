@@ -10,8 +10,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ja_dubbing.core.models import Segment
-from ja_dubbing.utils import (
+from xlanguage_dubbing.core.models import Segment
+from xlanguage_dubbing.utils import (
     PipelineError,
     atomic_write_json,
     atomic_write_text,

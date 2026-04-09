@@ -12,9 +12,9 @@ import gc
 from pathlib import Path
 from typing import List
 
-from ja_dubbing.config import HF_AUTH_TOKEN, PYANNOTE_MODEL
-from ja_dubbing.core.models import DiarizationSegment
-from ja_dubbing.utils import PipelineError, print_step
+from xlanguage_dubbing.config import HF_AUTH_TOKEN, PYANNOTE_MODEL
+from xlanguage_dubbing.core.models import DiarizationSegment
+from xlanguage_dubbing.utils import PipelineError, print_step
 
 _PIPELINE = None
 

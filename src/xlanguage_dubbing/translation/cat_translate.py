@@ -20,7 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
-from ja_dubbing.config import (
+from xlanguage_dubbing.config import (
     CAT_TRANSLATE_FILE,
     CAT_TRANSLATE_N_CTX,
     CAT_TRANSLATE_N_GPU_LAYERS,
@@ -32,10 +32,10 @@ from ja_dubbing.config import (
     INPUT_UNIQUE_RATIO_THRESHOLD,
     OUTPUT_REPEAT_THRESHOLD,
 )
-from ja_dubbing.core.models import Segment
-from ja_dubbing.core.progress import ProgressStore
-from ja_dubbing.audio.segment_io import load_segments_json, save_segments_json_atomic
-from ja_dubbing.utils import PipelineError, print_step
+from xlanguage_dubbing.core.models import Segment
+from xlanguage_dubbing.core.progress import ProgressStore
+from xlanguage_dubbing.audio.segment_io import load_segments_json, save_segments_json_atomic
+from xlanguage_dubbing.utils import PipelineError, print_step
 
 
 class CatTranslateError(Exception):
