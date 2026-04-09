@@ -15,18 +15,13 @@ def assign_speakers(
     segments: List[Segment],
     diarization: List[DiarizationSegment],
 ) -> List[Segment]:
-    """
-    各Whisperセグメントに最も重複時間が長い話者IDを割り当てる。
-    重複がない場合は、直前セグメントの話者IDを引き継ぐ。
-    直前もない場合は、時間的に最も近いdiarizationセグメントの話者を使用する。
-    """
+    """各Whisperセグメントに最も重複時間が長い話者IDを割り当てる。"""
     result: List[Segment] = []
     prev_speaker = ""
 
     for seg in segments:
         overlap: dict[str, float] = {}
         for dia in diarization:
-            # 重複区間を計算
             ov_start = max(seg.start, dia.start)
             ov_end = min(seg.end, dia.end)
             if ov_end > ov_start:
@@ -37,10 +32,8 @@ def assign_speakers(
         if overlap:
             best_speaker = max(overlap, key=lambda k: overlap[k])
         else:
-            # 重複なし: 直前セグメントの話者を引き継ぐ
             best_speaker = prev_speaker if prev_speaker else ""
 
-            # 直前もない場合: 時間的に最も近いdiarizationセグメントの話者を使用
             if not best_speaker and diarization:
                 seg_mid = (seg.start + seg.end) / 2.0
                 closest = min(
@@ -51,7 +44,6 @@ def assign_speakers(
                 )
                 best_speaker = closest.speaker
 
-            # それでも見つからない場合はUNKNOWN
             if not best_speaker:
                 best_speaker = "UNKNOWN"
 
@@ -61,8 +53,9 @@ def assign_speakers(
             idx=seg.idx,
             start=seg.start,
             end=seg.end,
-            text_en=seg.text_en,
-            text_ja=seg.text_ja,
+            text_src=seg.text_src,
+            text_tgt=seg.text_tgt,
             speaker_id=best_speaker,
+            detected_lang=seg.detected_lang,
         ))
     return result

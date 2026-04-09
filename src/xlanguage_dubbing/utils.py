@@ -35,17 +35,11 @@ def print_step(msg: str) -> None:
 
 
 def resolve_executable(bin_name: str) -> str:
-    """外部コマンドのフルパスを解決する。
-
-    shutil.which() を優先し、見つからない場合は Homebrew の標準パスを順に探索する。
-    macOS の GUI / uv / Gradio 起動経路で PATH が不十分な場合の対策。
-    """
-    # まず PATH 上を検索する
+    """外部コマンドのフルパスを解決する。"""
     found = shutil.which(bin_name)
     if found:
         return found
 
-    # PATH で見つからない場合は既知のディレクトリを順に探索する
     for dir_path in _HOMEBREW_PATHS:
         candidate = Path(dir_path) / bin_name
         if candidate.is_file() and candidate.stat().st_mode & 0o111:
@@ -55,24 +49,18 @@ def resolve_executable(bin_name: str) -> str:
 
 
 def which_or_raise(bin_name: str) -> str:
-    """コマンドのパスを取得する。見つからない場合は例外。
-
-    resolve_executable() のエイリアス。
-    """
+    """コマンドのパスを取得する。見つからない場合は例外。"""
     return resolve_executable(bin_name)
 
 
 def run_cmd(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    """外部コマンドを実行する。
-
-    cmd[0] がフルパスでなければ resolve_executable() で解決してから実行する。
-    """
+    """外部コマンドを実行する。"""
     resolved_cmd = list(cmd)
     if resolved_cmd and not Path(resolved_cmd[0]).is_absolute():
         try:
             resolved_cmd[0] = resolve_executable(resolved_cmd[0])
         except PipelineError:
-            pass  # 解決できなかった場合はそのまま実行を試みる
+            pass
 
     proc = subprocess.run(
         resolved_cmd,

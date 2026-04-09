@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from xlanguage_dubbing.config import (
-    ENGLISH_VOLUME,
-    JAPANESE_VOLUME,
+    DUBBED_VOLUME,
+    ORIGINAL_VOLUME,
     OUTPUT_SIZE,
     TTS_CHANNELS,
     TTS_SAMPLE_RATE,
@@ -25,7 +25,6 @@ from xlanguage_dubbing.utils import (
     which_or_raise,
 )
 
-# 映像・音声チャンクの最低区間幅（秒）
 _MIN_TRIM_SEC = 0.05
 
 
@@ -73,7 +72,7 @@ def extract_audio_segment(
     sample_rate: int = 44100,
     channels: int = 1,
 ) -> None:
-    """動画の指定区間から音声のみを抽出する。入力側シークで高速化。"""
+    """動画の指定区間から音声のみを抽出する。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_wav.parent)
     duration = max(0.0, end - start)
@@ -111,7 +110,7 @@ def build_atempo_filter(speed_factor: float) -> str:
 
 
 def _safe_trim_range(start: float, end: float) -> tuple[float, float]:
-    """trim区間が短すぎる場合に最低幅を確保する。"""
+    """trim区間の最低幅を確保する。"""
     s = max(0.0, float(start))
     e = max(s, float(end))
     if e - s < _MIN_TRIM_SEC:
@@ -127,7 +126,7 @@ def encode_video_chunk_ts(
     end: float,
     speed: float,
 ) -> None:
-    """動画チャンクをTSにエンコードする。入力側シークで高速化。"""
+    """動画チャンクをTSにエンコードする。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_ts.parent)
 
@@ -135,7 +134,6 @@ def encode_video_chunk_ts(
     spd = max(1e-6, float(speed))
     duration = e - s
 
-    # trim フィルタは入力側シーク後の相対時間で指定する
     vf = (
         f"trim=start=0:end={duration:.6f},"
         f"setpts=(PTS-STARTPTS)/{spd:.8f},"
@@ -162,7 +160,7 @@ def encode_video_chunk_ts(
     run_cmd(cmd)
 
 
-def encode_english_audio_chunk_flac(
+def encode_original_audio_chunk_flac(
     video_in: Path,
     out_flac: Path,
     *,
@@ -170,7 +168,7 @@ def encode_english_audio_chunk_flac(
     end: float,
     speed: float,
 ) -> None:
-    """英語音声チャンクをFLACにエンコードする。入力側シークで高速化。"""
+    """元音声チャンクをFLACにエンコードする。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_flac.parent)
 
@@ -179,7 +177,6 @@ def encode_english_audio_chunk_flac(
     duration = e - s
 
     atempo = build_atempo_filter(spd)
-    # 入力側シーク後の相対時間で atrim を指定する
     af = (
         f"atrim=start=0:end={duration:.6f},"
         f"asetpts=PTS-STARTPTS,"
@@ -241,7 +238,9 @@ def concat_ts_files(in_files: List[Path], out_ts: Path, list_file: Path) -> None
     run_cmd(cmd)
 
 
-def concat_audio_to_flac(in_files: List[Path], out_flac: Path, list_file: Path) -> None:
+def concat_audio_to_flac(
+    in_files: List[Path], out_flac: Path, list_file: Path
+) -> None:
     """音声ファイルをFLACに結合する。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_flac.parent)
@@ -281,26 +280,26 @@ def remux_ts_to_mp4(video_ts: Path, out_mp4: Path) -> None:
 
 def mux_retimed_video_with_tracks(
     video_in_mp4: Path,
-    japanese_flac: Path,
+    dubbed_flac: Path,
     out_mp4: Path,
     *,
-    english_flac: Optional[Path],
+    original_flac: Optional[Path],
 ) -> None:
     """リタイム済み映像に音声を合成する。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_mp4.parent)
 
-    if english_flac and english_flac.exists():
+    if original_flac and original_flac.exists():
         filter_complex = (
-            f"[1:a]volume={JAPANESE_VOLUME}[ja];"
-            f"[2:a]volume={ENGLISH_VOLUME}[en];"
-            f"[ja][en]amix=inputs=2:duration=first:normalize=0[aout]"
+            f"[1:a]volume={DUBBED_VOLUME}[dubbed];"
+            f"[2:a]volume={ORIGINAL_VOLUME}[orig];"
+            f"[dubbed][orig]amix=inputs=2:duration=first:normalize=0[aout]"
         )
         cmd = [
             "ffmpeg", "-y",
             "-i", str(video_in_mp4),
-            "-i", str(japanese_flac),
-            "-i", str(english_flac),
+            "-i", str(dubbed_flac),
+            "-i", str(original_flac),
             "-filter_complex", filter_complex,
             "-map", "0:v:0",
             "-map", "[aout]",
@@ -314,7 +313,7 @@ def mux_retimed_video_with_tracks(
         cmd = [
             "ffmpeg", "-y",
             "-i", str(video_in_mp4),
-            "-i", str(japanese_flac),
+            "-i", str(dubbed_flac),
             "-map", "0:v:0",
             "-map", "1:a:0",
             "-c:v", "copy",

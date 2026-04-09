@@ -3,8 +3,7 @@
 """
 OmniVoice による音声合成処理。
 600+言語対応のゼロショットボイスクローン TTS。
-参照音声の声色を再現しつつ、日本語テキストを読み上げる。
-duration パラメータにより再生時間制御が可能。
+OUTPUT_LANG に合わせた言語で音声を生成する。
 """
 
 from __future__ import annotations
@@ -43,7 +42,6 @@ from xlanguage_dubbing.utils import (
     which_or_raise,
 )
 
-# モデルの遅延ロード用グローバルキャッシュ
 _OMNIVOICE_MODEL = None
 
 
@@ -65,7 +63,6 @@ def _get_dtype() -> torch.dtype:
         return torch.bfloat16
     if dtype_str in ("float16", "fp16"):
         return torch.float16
-    # MPS では float32 が最も安定（bfloat16/float16 は音声品質劣化の報告あり）
     return torch.float32
 
 
@@ -82,8 +79,7 @@ def _get_omnivoice_model():
     except ImportError as exc:
         raise PipelineError(
             "omnivoice がインストールされていません。\n"
-            "以下を実行してください:\n"
-            "  uv sync\n"
+            "  uv sync を実行してください。\n"
         ) from exc
 
     device = _get_device()
@@ -102,7 +98,7 @@ def _get_omnivoice_model():
 
 
 def release_omnivoice_model() -> None:
-    """OmniVoice モデルを解放してメモリを回復する。"""
+    """OmniVoice モデルを解放する。"""
     global _OMNIVOICE_MODEL
 
     if _OMNIVOICE_MODEL is not None:
@@ -117,7 +113,7 @@ def release_omnivoice_model() -> None:
 
 
 def omnivoice_synthesize(
-    text_ja: str,
+    text: str,
     out_wav: Path,
     ref_audio_path: Optional[Path] = None,
     ref_text: str = "",
@@ -128,19 +124,16 @@ def omnivoice_synthesize(
     model = _get_omnivoice_model()
 
     gen_kwargs = {
-        "text": text_ja,
+        "text": text,
         "num_step": OMNIVOICE_NUM_STEP,
         "guidance_scale": OMNIVOICE_GUIDANCE_SCALE,
     }
 
-    # ボイスクローン: 参照音声が指定されている場合
     if ref_audio_path is not None and ref_audio_path.exists():
         gen_kwargs["ref_audio"] = str(ref_audio_path)
-        # ref_text が空なら OmniVoice 内蔵の Whisper が自動文字起こしする
         if ref_text.strip():
             gen_kwargs["ref_text"] = ref_text.strip()
 
-    # 再生時間制御: duration が指定されている場合は duration を優先
     if target_duration is not None and target_duration > 0:
         gen_kwargs["duration"] = target_duration
     elif OMNIVOICE_SPEED != 1.0:
@@ -154,14 +147,11 @@ def omnivoice_synthesize(
     if not audio_list or len(audio_list) == 0:
         raise PipelineError("OmniVoice: 生成音声が空です。")
 
-    # audio_list は List[torch.Tensor] で各テンソルは (1, T) @ 24kHz
-    # 全チャンクを結合
     if len(audio_list) == 1:
         waveform = audio_list[0]
     else:
         waveform = torch.cat(audio_list, dim=-1)
 
-    # WAV として保存（24kHz）
     try:
         import soundfile as sf
     except ImportError as exc:
@@ -175,7 +165,7 @@ def omnivoice_synthesize(
 
 
 def _convert_to_flac(in_wav: Path, out_flac: Path) -> None:
-    """OmniVoice が出力した WAV（24kHz）をプロジェクト標準の FLAC に変換する。"""
+    """WAV をプロジェクト標準の FLAC に変換する。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_flac.parent)
     cmd = [
@@ -194,7 +184,7 @@ def _validate_omnivoice_quality(
     target_duration_sec: float,
     text: str,
 ) -> None:
-    """生成音声の長さが目標から大きく外れていないか検査する。"""
+    """生成音声の品質を検査する。"""
     if not text.strip():
         raise TTSQualityError("合成対象テキストが空です。")
     if audio_duration_sec <= 0:
@@ -222,7 +212,7 @@ def _synthesize_with_quality_retry(
 
     for attempt in range(1, attempts + 1):
         omnivoice_synthesize(
-            text_ja=text,
+            text=text,
             out_wav=tmp_wav,
             ref_audio_path=ref_audio_path,
             ref_text=ref_text,
@@ -266,14 +256,11 @@ def generate_segment_tts_omnivoice(
     ref_cache: SpeakerReferenceCache,
     segno: int = 0,
 ) -> Optional[TtsMeta]:
-    """OmniVoice でセグメントのボイスクローン音声を生成する。
-
-    セグメント単位リファレンスを優先し、なければ話者代表リファレンスにフォールバックする。
-    """
+    """OmniVoice でセグメントのボイスクローン音声を生成する。"""
     if seg.duration < MIN_SEGMENT_SEC:
         return None
 
-    text = sanitize_text_for_tts(seg.text_ja)
+    text = sanitize_text_for_tts(seg.text_tgt)
     if not text:
         return None
 
@@ -287,7 +274,6 @@ def generate_segment_tts_omnivoice(
                 duration_sec=float(duration),
             )
 
-    # セグメント単位リファレンスを優先、なければ話者代表にフォールバック
     seg_ref_path = ref_cache.get_omnivoice_segment_reference_path(segno)
     if seg_ref_path is not None:
         reference_speech = seg_ref_path
@@ -331,11 +317,6 @@ def generate_segment_tts_omnivoice(
         flac_path=str(out_flac),
         duration_sec=float(duration),
     )
-
-
-# =========================================================
-# TTS メタ I/O（miotts.py から移動）
-# =========================================================
 
 
 def load_tts_meta(path: Path) -> dict[int, TtsMeta]:

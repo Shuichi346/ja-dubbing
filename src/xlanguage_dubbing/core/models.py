@@ -20,14 +20,31 @@ class DiarizationSegment:
 
 @dataclass(frozen=True)
 class Segment:
-    """音声セグメントを表すデータクラス。"""
+    """音声セグメントを表すデータクラス。
+
+    text_src: 元言語のテキスト（旧 text_en）
+    text_tgt: 翻訳後のテキスト（旧 text_ja）
+    detected_lang: 検出された元言語の ISO 639-1 コード
+    """
 
     idx: int
     start: float
     end: float
-    text_en: str
-    text_ja: str = ""
+    text_src: str
+    text_tgt: str = ""
     speaker_id: str = ""
+    detected_lang: str = ""
+
+    # 後方互換性のためのプロパティ
+    @property
+    def text_en(self) -> str:
+        """text_src のエイリアス（後方互換性）。"""
+        return self.text_src
+
+    @property
+    def text_ja(self) -> str:
+        """text_tgt のエイリアス（後方互換性）。"""
+        return self.text_tgt
 
     @property
     def duration(self) -> float:
@@ -52,5 +69,5 @@ class RetimePart:
     orig_start: float
     orig_end: float
     out_duration: float
-    speed: float  # 動画(元区間)を何倍速で再生するか
+    speed: float
     segno: int = 0  # speech の場合のみ 1-based

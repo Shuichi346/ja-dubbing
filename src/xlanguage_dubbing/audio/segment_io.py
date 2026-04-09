@@ -19,11 +19,6 @@ from xlanguage_dubbing.utils import (
 )
 
 
-# =========================
-# セグメントJSON I/O
-# =========================
-
-
 def segments_to_payload(segments: List[Segment]) -> List[Dict[str, Any]]:
     """セグメントリストをJSONペイロードに変換する。"""
     return [
@@ -31,9 +26,10 @@ def segments_to_payload(segments: List[Segment]) -> List[Dict[str, Any]]:
             "idx": s.idx,
             "start": s.start,
             "end": s.end,
-            "text_en": s.text_en,
-            "text_ja": s.text_ja,
+            "text_src": s.text_src,
+            "text_tgt": s.text_tgt,
             "speaker_id": s.speaker_id,
+            "detected_lang": s.detected_lang,
         }
         for s in segments
     ]
@@ -47,14 +43,22 @@ def payload_to_segments(payload: Any) -> List[Segment]:
     for i, row in enumerate(payload):
         if not isinstance(row, dict):
             continue
+        # 後方互換性: text_en → text_src, text_ja → text_tgt
+        text_src = str(
+            row.get("text_src", "") or row.get("text_en", "") or ""
+        )
+        text_tgt = str(
+            row.get("text_tgt", "") or row.get("text_ja", "") or ""
+        )
         out.append(
             Segment(
                 idx=int(row.get("idx", i)),
                 start=float(row.get("start", 0.0)),
                 end=float(row.get("end", 0.0)),
-                text_en=str(row.get("text_en", "") or ""),
-                text_ja=str(row.get("text_ja", "") or ""),
+                text_src=text_src,
+                text_tgt=text_tgt,
                 speaker_id=str(row.get("speaker_id", "") or ""),
+                detected_lang=str(row.get("detected_lang", "") or ""),
             )
         )
     return out
@@ -71,11 +75,6 @@ def load_segments_json(out_json: Path) -> List[Segment]:
     if obj is None:
         raise PipelineError(f"segments json が読み込めません: {out_json}")
     return payload_to_segments(obj)
-
-
-# =========================
-# SRT出力
-# =========================
 
 
 def _format_srt_timestamp(sec: float) -> str:
@@ -97,7 +96,7 @@ def _segments_to_srt_text(segments: List[Segment]) -> str:
     lines: List[str] = []
     counter = 1
     for seg in segments:
-        text = (seg.text_en or "").strip()
+        text = (seg.text_src or "").strip()
         if not text:
             continue
         start = float(seg.start)

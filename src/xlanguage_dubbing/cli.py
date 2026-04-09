@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 CLIエントリーポイント。
-VIDEO_FOLDER 内に動画があればフォルダー一括処理、
-フォルダーが存在しないか動画が0本の場合はターミナルから動画パスを1本入力して処理する。
 """
 
 from __future__ import annotations
@@ -12,7 +10,13 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-from xlanguage_dubbing.config import TEMP_ROOT, VIDEO_EXTS, VIDEO_FOLDER
+from xlanguage_dubbing.config import (
+    INPUT_LANG,
+    OUTPUT_LANG,
+    TEMP_ROOT,
+    VIDEO_EXTS,
+    VIDEO_FOLDER,
+)
 from xlanguage_dubbing.core.pipeline import process_one_video
 from xlanguage_dubbing.segments.spacy_split import initialize_spacy
 from xlanguage_dubbing.servers.health import generate_start_script
@@ -27,30 +31,16 @@ from xlanguage_dubbing.utils import (
 )
 
 
-# =========================================================
-# macOS パス文字列の正規化
-# =========================================================
-
-
 def _normalize_user_path(raw: str) -> Path:
-    """ユーザー入力のパス文字列を正規化する。
-
-    macOS のターミナルや Finder からコピーしたパスに含まれる
-    シングルクォート・ダブルクォートやバックスラッシュエスケープを除去する。
-    """
+    """ユーザー入力のパス文字列を正規化する。"""
     s = raw.strip()
     s = s.strip("'\"")
     s = s.replace("\\ ", " ")
     return Path(s).expanduser().resolve()
 
 
-# =========================================================
-# ターミナル入力による動画パス取得
-# =========================================================
-
-
 def _prompt_video_path() -> Path:
-    """ターミナルから動画のパスを入力させて検証する。"""
+    """ターミナルから動画パスを入力させる。"""
     print_step("VIDEO_FOLDER に処理対象の動画がありません。")
     print_step("処理したい動画ファイルのパスを直接入力してください。")
 
@@ -84,24 +74,22 @@ def _prompt_video_path() -> Path:
         return video_path
 
 
-# =========================================================
-# 事前チェック
-# =========================================================
-
-
 def preflight_checks() -> None:
-    """事前チェック（VIDEO_FOLDER の存在は問わない）。"""
+    """事前チェック。"""
     which_or_raise("ffmpeg")
     which_or_raise("ffprobe")
     ensure_dir(TEMP_ROOT)
+
+    print_step(f"  入力言語: {INPUT_LANG}")
+    print_step(f"  出力言語: {OUTPUT_LANG}")
 
     try:
         import torch
 
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            print_step("  OmniVoice 推論デバイス: mps")
+            print_step("  推論デバイス: mps")
         else:
-            print_step("  OmniVoice 推論デバイス: cpu")
+            print_step("  推論デバイス: cpu")
     except ImportError as exc:
         raise PipelineError(
             "torch がインストールされていません。\n"
@@ -109,13 +97,8 @@ def preflight_checks() -> None:
         ) from exc
 
 
-# =========================================================
-# 動画リスト取得
-# =========================================================
-
-
 def list_videos(folder: Path) -> list[Path]:
-    """対象動画ファイルのリストを取得する。フォルダー未存在時は空リストを返す。"""
+    """対象動画ファイルのリストを取得する。"""
     if not folder.exists():
         return []
     return sorted(
@@ -124,13 +107,8 @@ def list_videos(folder: Path) -> list[Path]:
     )
 
 
-# =========================================================
-# 動画処理
-# =========================================================
-
-
 def _process_single_video(video_path: Path) -> int:
-    """動画1本を処理して終了する。再開機能は動画名ベースで動作する。"""
+    """動画1本を処理する。"""
     print_step(f"単体モード: {video_path.name}")
     client = CatTranslateClient()
     work_dir = TEMP_ROOT / video_path.stem
@@ -151,7 +129,7 @@ def _process_single_video(video_path: Path) -> int:
 
 
 def _process_folder_videos(videos: list[Path]) -> int:
-    """VIDEO_FOLDER 内の動画を順次処理する。"""
+    """フォルダ内の動画を順次処理する。"""
     print_step(f"処理対象動画数: {len(videos)}")
     client = CatTranslateClient()
 
@@ -181,14 +159,8 @@ def _process_folder_videos(videos: list[Path]) -> int:
     return 0
 
 
-# =========================================================
-# メインエントリーポイント
-# =========================================================
-
-
 def main() -> int:
     """メインエントリーポイント。"""
-    # macOS + MLX 環境で multiprocessing を安全に使うため spawn を設定する
     try:
         multiprocessing.set_start_method("spawn", force=False)
     except RuntimeError:
@@ -205,14 +177,11 @@ def main() -> int:
     try:
         preflight_checks()
 
-        # VIDEO_FOLDER 内の動画を検索する
         videos = list_videos(VIDEO_FOLDER)
 
         if videos:
-            # フォルダーモード: 動画が見つかった場合は一括処理
             return _process_folder_videos(videos)
         else:
-            # 単体モード: フォルダー未存在 or 動画0本 → ターミナル入力
             video_path = _prompt_video_path()
             return _process_single_video(video_path)
 

@@ -23,13 +23,11 @@ def _get_spacy_nlp():
         return _SPACY_NLP
 
     try:
-        import spacy  # type: ignore
+        import spacy
     except Exception as exc:
         raise PipelineError(
             "spaCy がインストールされていません。\n"
-            "以下を実行してください:\n"
-            "  uv pip install -U spacy\n"
-            "  uv run python -m spacy download en_core_web_sm\n"
+            "  uv sync を実行してください。\n"
         ) from exc
 
     try:
@@ -37,7 +35,6 @@ def _get_spacy_nlp():
     except Exception as exc:
         raise PipelineError(
             f"spaCyモデル '{SPACY_MODEL}' が読み込めません。\n"
-            "以下を実行してください:\n"
             f"  uv run python -m spacy download {SPACY_MODEL}\n"
         ) from exc
 
@@ -65,7 +62,7 @@ def chunk_segments_for_spacy(
     max_chars: int,
     max_gap_sec: float,
 ) -> List[Segment]:
-    """spaCy処理前にセグメントをチャンク化する。同一話者のみ結合。"""
+    """spaCy処理前にセグメントをチャンク化する。"""
     if not segments:
         return []
 
@@ -74,24 +71,25 @@ def chunk_segments_for_spacy(
 
     def flush() -> None:
         nonlocal buf
-        if buf is not None and (buf.text_en or "").strip():
+        if buf is not None and (buf.text_src or "").strip():
             out.append(buf)
         buf = None
 
     for s in segments:
-        text = (s.text_en or "").strip()
+        text = (s.text_src or "").strip()
         if not text:
             continue
 
         if buf is None:
             buf = Segment(
                 idx=len(out), start=s.start, end=s.end,
-                text_en=text, speaker_id=s.speaker_id,
+                text_src=text, speaker_id=s.speaker_id,
+                detected_lang=s.detected_lang,
             )
             continue
 
         gap = max(0.0, s.start - buf.end)
-        new_text = (buf.text_en + " " + text).strip()
+        new_text = (buf.text_src + " " + text).strip()
         new_dur = max(0.0, s.end - buf.start)
 
         can_merge = (
@@ -104,27 +102,30 @@ def chunk_segments_for_spacy(
         if can_merge:
             buf = Segment(
                 idx=buf.idx, start=buf.start, end=s.end,
-                text_en=new_text, speaker_id=buf.speaker_id,
+                text_src=new_text, speaker_id=buf.speaker_id,
+                detected_lang=buf.detected_lang or s.detected_lang,
             )
         else:
             flush()
             buf = Segment(
                 idx=len(out), start=s.start, end=s.end,
-                text_en=text, speaker_id=s.speaker_id,
+                text_src=text, speaker_id=s.speaker_id,
+                detected_lang=s.detected_lang,
             )
 
     flush()
     return [
         Segment(
             idx=i, start=s.start, end=s.end,
-            text_en=s.text_en, speaker_id=s.speaker_id,
+            text_src=s.text_src, speaker_id=s.speaker_id,
+            detected_lang=s.detected_lang,
         )
         for i, s in enumerate(out)
     ]
 
 
 def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
-    """セグメントをspaCyで文単位に分割する。speaker_idを継承する。"""
+    """セグメントをspaCyで文単位に分割する。"""
     if not segments:
         return []
 
@@ -132,7 +133,7 @@ def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
     out: List[Segment] = []
 
     for seg in segments:
-        text = (seg.text_en or "").strip()
+        text = (seg.text_src or "").strip()
         if not text:
             continue
 
@@ -149,8 +150,9 @@ def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
                     idx=len(out),
                     start=seg.start,
                     end=seg.end,
-                    text_en=normalize_spaces(text),
+                    text_src=normalize_spaces(text),
                     speaker_id=seg.speaker_id,
+                    detected_lang=seg.detected_lang,
                 )
             )
             continue
@@ -163,8 +165,9 @@ def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
                     idx=len(out),
                     start=seg.start,
                     end=seg.end,
-                    text_en=normalize_spaces(text),
+                    text_src=normalize_spaces(text),
                     speaker_id=seg.speaker_id,
+                    detected_lang=seg.detected_lang,
                 )
             )
             continue
@@ -190,8 +193,9 @@ def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
                     idx=len(out),
                     start=float(sent_start),
                     end=float(sent_end),
-                    text_en=normalize_spaces(sent),
+                    text_src=normalize_spaces(sent),
                     speaker_id=seg.speaker_id,
+                    detected_lang=seg.detected_lang,
                 )
             )
 
@@ -199,5 +203,5 @@ def split_segments_by_spacy_sentences(segments: List[Segment]) -> List[Segment]:
 
 
 def initialize_spacy() -> None:
-    """spaCyを初期化する（事前チェック用）。"""
+    """spaCyを初期化する。"""
     _get_spacy_nlp()

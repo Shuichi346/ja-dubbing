@@ -56,21 +56,31 @@ def _env_bool(key: str, default: bool) -> bool:
 
 VIDEO_FOLDER = Path(_env("VIDEO_FOLDER", "./input_videos"))
 TEMP_ROOT = Path(_env("TEMP_ROOT", "./temp"))
-OUTPUT_SUFFIX = _env("OUTPUT_SUFFIX", "_jaDub.mp4")
+OUTPUT_SUFFIX = _env("OUTPUT_SUFFIX", "_xlDub.mp4")
 KEEP_TEMP = _env_bool("KEEP_TEMP", True)
+
+# =========================
+# 言語設定
+# =========================
+
+# 元動画の音声言語（auto で ASR が自動判定）
+INPUT_LANG = _env("INPUT_LANG", "auto").strip().lower()
+# 出力する吹き替え言語（必須・明示指定）
+OUTPUT_LANG = _env("OUTPUT_LANG", "ja").strip().lower()
 
 # =========================
 # ASR共通
 # =========================
 
-ASR_ENGINE = _env("ASR_ENGINE", "whisper")  # "whisper" or "vibevoice"
+ASR_ENGINE = _env("ASR_ENGINE", "vibevoice")  # "vibevoice" or "whisper"
 
 # =========================
 # whisper.cpp（CLIバイナリ + VAD）
 # =========================
 
 WHISPER_MODEL = _env("WHISPER_MODEL", "large-v3-turbo")
-WHISPER_LANG = _env("WHISPER_LANG", "en")
+# whisper の言語設定: INPUT_LANG=auto なら auto、それ以外は INPUT_LANG を使用
+WHISPER_LANG = _env("WHISPER_LANG", INPUT_LANG if INPUT_LANG != "" else "auto")
 VAD_MODEL = _env("VAD_MODEL", "silero-v6.2.0")
 
 WHISPER_CPP_DIR = Path(_env("WHISPER_CPP_DIR", "./whisper.cpp"))
@@ -111,7 +121,7 @@ HF_AUTH_TOKEN = _env("HF_AUTH_TOKEN", "")
 PYANNOTE_MODEL = _env("PYANNOTE_MODEL", "pyannote/speaker-diarization-community-1")
 
 # =========================
-# CAT-Translate（英日翻訳）
+# CAT-Translate（日英特化翻訳）
 # =========================
 
 CAT_TRANSLATE_REPO = _env("CAT_TRANSLATE_REPO", "mradermacher/CAT-Translate-7b-GGUF")
@@ -123,29 +133,36 @@ CAT_TRANSLATE_RETRY_BACKOFF_SEC = _env_float("CAT_TRANSLATE_RETRY_BACKOFF_SEC", 
 CAT_TRANSLATE_REPEAT_PENALTY = _env_float("CAT_TRANSLATE_REPEAT_PENALTY", 1.2)
 
 # =========================
+# TranslateGemma（多言語翻訳）
+# =========================
+
+TRANSLATEGEMMA_REPO = _env(
+    "TRANSLATEGEMMA_REPO", "mradermacher/translategemma-12b-it-GGUF"
+)
+TRANSLATEGEMMA_FILE = _env(
+    "TRANSLATEGEMMA_FILE", "translategemma-12b-it.Q8_0.gguf"
+)
+TRANSLATEGEMMA_N_GPU_LAYERS = _env_int("TRANSLATEGEMMA_N_GPU_LAYERS", -1)
+TRANSLATEGEMMA_N_CTX = _env_int("TRANSLATEGEMMA_N_CTX", 2048)
+TRANSLATEGEMMA_RETRIES = _env_int("TRANSLATEGEMMA_RETRIES", 3)
+TRANSLATEGEMMA_RETRY_BACKOFF_SEC = _env_float("TRANSLATEGEMMA_RETRY_BACKOFF_SEC", 1.5)
+TRANSLATEGEMMA_REPEAT_PENALTY = _env_float("TRANSLATEGEMMA_REPEAT_PENALTY", 1.2)
+
+# =========================
 # OmniVoice（ボイスクローン + 再生時間制御）
 # =========================
 
 OMNIVOICE_MODEL = _env("OMNIVOICE_MODEL", "k2-fsa/OmniVoice")
-# MPS では float32 が安定（bfloat16/float16 は muffled voice の問題あり）
 OMNIVOICE_DTYPE = _env("OMNIVOICE_DTYPE", "float32")
-# Diffusion ステップ数（32 が高品質、16 で高速化）
 OMNIVOICE_NUM_STEP = _env_int("OMNIVOICE_NUM_STEP", 32)
-# Classifier-free guidance scale
 OMNIVOICE_GUIDANCE_SCALE = _env_float("OMNIVOICE_GUIDANCE_SCALE", 2.0)
-# 読み上げ速度（1.0 が標準、>1.0 で速く、<1.0 で遅く）
 OMNIVOICE_SPEED = _env_float("OMNIVOICE_SPEED", 1.0)
-# 元セグメントの長さに対する倍率（duration 制御に使用）
 OMNIVOICE_DURATION_SCALE = _env_float("OMNIVOICE_DURATION_SCALE", 1.15)
-# 参照音声の最小・最大・目標秒数
 OMNIVOICE_REFERENCE_MIN_SEC = _env_float("OMNIVOICE_REFERENCE_MIN_SEC", 3.0)
 OMNIVOICE_REFERENCE_MAX_SEC = _env_float("OMNIVOICE_REFERENCE_MAX_SEC", 15.0)
 OMNIVOICE_REFERENCE_TARGET_SEC = _env_float("OMNIVOICE_REFERENCE_TARGET_SEC", 8.0)
-# 品質バリデーション: 生成音声の長さが target_duration のこの倍率を超えたら再生成
 OMNIVOICE_DURATION_TOLERANCE = _env_float("OMNIVOICE_DURATION_TOLERANCE", 0.5)
-# 品質リトライ回数
 OMNIVOICE_QUALITY_RETRIES = _env_int("OMNIVOICE_QUALITY_RETRIES", 2)
-# OmniVoice のネイティブサンプリングレート（24kHz）
 OMNIVOICE_SAMPLE_RATE = 24000
 
 # =========================
@@ -193,8 +210,8 @@ INPUT_UNIQUE_RATIO_THRESHOLD = _env_float("INPUT_UNIQUE_RATIO_THRESHOLD", 0.3)
 # 音量ミックス
 # =========================
 
-ENGLISH_VOLUME = _env_float("ENGLISH_VOLUME", 0.10)
-JAPANESE_VOLUME = _env_float("JAPANESE_VOLUME", 1.00)
+ORIGINAL_VOLUME = _env_float("ORIGINAL_VOLUME", 0.10)
+DUBBED_VOLUME = _env_float("DUBBED_VOLUME", 1.00)
 
 # =========================
 # 出力設定

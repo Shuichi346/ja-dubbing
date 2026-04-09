@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 話者別リファレンス音声の抽出・キャッシュ管理。
-OmniVoice 用の話者代表リファレンス（3〜15秒）とセグメント単位リファレンスを管理する。
-Kokoro TTS はボイスクローン非対応のためリファレンス不要。
 """
 
 from __future__ import annotations
@@ -35,49 +33,35 @@ class SpeakerReferenceCache:
 
     def __init__(self, cache_dir: Path) -> None:
         self._cache_dir = cache_dir
-        # OmniVoice 用: 話者代表リファレンス
         self._omnivoice_refs: Dict[str, Path] = {}
-        # OmniVoice 用: 参照音声の書き起こしテキスト
         self._omnivoice_prompt_texts: Dict[str, str] = {}
-        # OmniVoice 用: セグメント単位リファレンス音声
         self._omnivoice_segment_refs: Dict[int, Path] = {}
-        # OmniVoice 用: セグメント単位リファレンスの書き起こしテキスト
         self._omnivoice_segment_prompt_texts: Dict[int, str] = {}
         ensure_dir(cache_dir)
 
     @property
     def cache_dir(self) -> Path:
-        """キャッシュディレクトリのパスを返す。"""
         return self._cache_dir
 
-    # ========================================
-    # OmniVoice 用: 話者代表リファレンス
-    # ========================================
-
     def get_omnivoice_reference_path(self, speaker_id: str) -> Optional[Path]:
-        """OmniVoice 用の代表リファレンス音声の絶対パスを返す。"""
         path = self._omnivoice_refs.get(speaker_id)
         if path and path.exists():
             return path.resolve()
         return None
 
     def get_omnivoice_prompt_text(self, speaker_id: str) -> str:
-        """OmniVoice 参照音声の英語テキストを返す。"""
         return self._omnivoice_prompt_texts.get(speaker_id, "")
 
     def get_omnivoice_segment_reference_path(self, segno: int) -> Optional[Path]:
-        """OmniVoice セグメント単位リファレンス音声のパスを返す。"""
         path = self._omnivoice_segment_refs.get(segno)
         if path and path.exists():
             return path.resolve()
         return None
 
     def get_omnivoice_segment_prompt_text(self, segno: int) -> str:
-        """OmniVoice セグメント単位リファレンスの書き起こしテキストを返す。"""
         return self._omnivoice_segment_prompt_texts.get(segno, "")
 
     def reload_speaker_references(self, speaker_ids: Set[str]) -> None:
-        """再開時にキャッシュ済み話者代表リファレンスを検出してロードする。"""
         for speaker_id in speaker_ids:
             ov_wav = self._cache_dir / f"ovref_{speaker_id}.wav"
             if ov_wav.exists():
@@ -91,11 +75,6 @@ class SpeakerReferenceCache:
         diarization: List[DiarizationSegment],
         segments: List[Segment],
     ) -> None:
-        """OmniVoice 用の話者代表リファレンス音声を生成する。
-
-        話者代表リファレンスは各話者から1つだけ選ぶ代表音声であり、
-        ASR での再文字起こしを使って参照テキストの精度を高める。
-        """
         from xlanguage_dubbing.asr import transcribe_reference_audio
 
         speakers: Dict[str, List[DiarizationSegment]] = {}
@@ -118,38 +97,25 @@ class SpeakerReferenceCache:
                 target_sec=OMNIVOICE_REFERENCE_TARGET_SEC,
             )
             if best_seg is None:
-                print_step(
-                    f"  警告: OmniVoice 用リファレンスなし: {speaker_id}"
-                )
+                print_step(f"  警告: リファレンスなし: {speaker_id}")
                 continue
 
             if not out_wav.exists():
                 extract_audio_segment(
-                    video_path,
-                    out_wav,
-                    start=best_seg.start,
-                    end=best_seg.end,
-                    sample_rate=44100,
-                    channels=1,
+                    video_path, out_wav,
+                    start=best_seg.start, end=best_seg.end,
+                    sample_rate=44100, channels=1,
                 )
 
             if out_wav.exists() and out_wav.stat().st_size > 100:
                 self._omnivoice_refs[speaker_id] = out_wav
                 ref_dur = best_seg.end - best_seg.start
 
-                # 話者代表は1話者1回だけなので ASR 再文字起こしのコストは小さい
-                prompt_text = transcribe_reference_audio(
-                    out_wav, language="en",
-                )
+                prompt_text = transcribe_reference_audio(out_wav, language="")
                 if not prompt_text:
                     prompt_text = _collect_reference_prompt_text(
                         best_seg, segments
                     )
-                    if prompt_text:
-                        print_step(
-                            f"    ASR 失敗: {speaker_id} → "
-                            "セグメントテキストからフォールバック"
-                        )
 
                 self._omnivoice_prompt_texts[speaker_id] = prompt_text
                 prompt_meta[speaker_id] = {
@@ -172,13 +138,6 @@ class SpeakerReferenceCache:
         video_path: Path,
         segments: List[Segment],
     ) -> None:
-        """OmniVoice 用のセグメント単位リファレンス音声を生成する。
-
-        各セグメントの元英語音声を切り出し、セグメントが既に持っている
-        text_en を参照テキストとして使用する。
-        ステップ2の ASR で文字起こし済みのテキストと時間範囲は対応しているため、
-        セグメントごとの再文字起こしは不要。
-        """
         seg_ref_dir = self._cache_dir / "omnivoice_segment_refs"
         ensure_dir(seg_ref_dir)
 
@@ -187,7 +146,6 @@ class SpeakerReferenceCache:
         for segno, seg in enumerate(segments, start=1):
             out_wav = seg_ref_dir / f"ovseg_ref_{segno:05d}.wav"
 
-            # 既にキャッシュがあり、メタデータも読み込み済みならスキップ
             if (
                 out_wav.exists()
                 and segno in self._omnivoice_segment_prompt_texts
@@ -214,9 +172,7 @@ class SpeakerReferenceCache:
 
             self._omnivoice_segment_refs[segno] = out_wav
 
-            # セグメントの英語テキストをそのまま参照テキストとして使用する
-            prompt_text = normalize_spaces(seg.text_en)
-
+            prompt_text = normalize_spaces(seg.text_src)
             self._omnivoice_segment_prompt_texts[segno] = prompt_text
 
             segment_meta[str(segno)] = {
@@ -234,7 +190,6 @@ class SpeakerReferenceCache:
         )
 
     def reload_omnivoice_segment_references(self, total_segments: int) -> None:
-        """再開時にキャッシュ済み OmniVoice セグメント単位リファレンスを検出する。"""
         seg_ref_dir = self._cache_dir / "omnivoice_segment_refs"
         if not seg_ref_dir.exists():
             return
@@ -244,10 +199,7 @@ class SpeakerReferenceCache:
                 self._omnivoice_segment_refs[segno] = wav_path
         self._load_omnivoice_segment_meta()
 
-    def _save_omnivoice_prompt_meta(
-        self, meta: Dict[str, Dict[str, str | float]]
-    ) -> None:
-        """OmniVoice プロンプトメタデータを保存する。"""
+    def _save_omnivoice_prompt_meta(self, meta):
         meta_path = self._cache_dir / "omnivoice_prompt_meta.json"
         existing = load_json_if_exists(meta_path)
         if isinstance(existing, dict):
@@ -255,8 +207,7 @@ class SpeakerReferenceCache:
             meta = existing
         atomic_write_json(meta_path, meta)
 
-    def _load_omnivoice_prompt_meta(self) -> None:
-        """OmniVoice プロンプトメタデータを読み込む。"""
+    def _load_omnivoice_prompt_meta(self):
         meta_path = self._cache_dir / "omnivoice_prompt_meta.json"
         obj = load_json_if_exists(meta_path)
         if not isinstance(obj, dict):
@@ -268,10 +219,7 @@ class SpeakerReferenceCache:
                 info.get("prompt_text", "") or ""
             )
 
-    def _save_omnivoice_segment_meta(
-        self, meta: Dict[str, Dict[str, str | float]]
-    ) -> None:
-        """OmniVoice セグメント単位メタデータを保存する。"""
+    def _save_omnivoice_segment_meta(self, meta):
         meta_path = self._cache_dir / "omnivoice_segment_meta.json"
         existing = load_json_if_exists(meta_path)
         if isinstance(existing, dict):
@@ -279,8 +227,7 @@ class SpeakerReferenceCache:
             meta = existing
         atomic_write_json(meta_path, meta)
 
-    def _load_omnivoice_segment_meta(self) -> None:
-        """OmniVoice セグメント単位メタデータを読み込む。"""
+    def _load_omnivoice_segment_meta(self):
         meta_path = self._cache_dir / "omnivoice_segment_meta.json"
         obj = load_json_if_exists(meta_path)
         if not isinstance(obj, dict):
@@ -296,8 +243,7 @@ class SpeakerReferenceCache:
                 info.get("prompt_text", "") or ""
             )
 
-    def clear(self) -> None:
-        """キャッシュをクリアしてメモリを解放する。"""
+    def clear(self):
         self._omnivoice_refs.clear()
         self._omnivoice_prompt_texts.clear()
         self._omnivoice_segment_refs.clear()
@@ -305,13 +251,7 @@ class SpeakerReferenceCache:
         gc.collect()
 
 
-def _select_best_reference_segment(
-    dia_segments: List[DiarizationSegment],
-    min_sec: float,
-    max_sec: float,
-    target_sec: float,
-) -> Optional[DiarizationSegment]:
-    """目標秒数に最も近いリファレンス区間を選ぶ。"""
+def _select_best_reference_segment(dia_segments, min_sec, max_sec, target_sec):
     candidates = []
     for seg in dia_segments:
         dur = seg.end - seg.start
@@ -326,7 +266,7 @@ def _select_best_reference_segment(
                 return longest
         return None
 
-    def score(seg: DiarizationSegment) -> float:
+    def score(seg):
         dur = seg.end - seg.start
         if dur > max_sec:
             dur = max_sec
@@ -341,16 +281,11 @@ def _select_best_reference_segment(
             end=best.start + max_sec,
             speaker=best.speaker,
         )
-
     return best
 
 
-def _collect_reference_prompt_text(
-    reference_seg: DiarizationSegment,
-    segments: List[Segment],
-) -> str:
-    """参照音声区間と重なる英語文字起こしを結合する。"""
-    overlapped: List[tuple[float, Segment]] = []
+def _collect_reference_prompt_text(reference_seg, segments):
+    overlapped = []
     for seg in segments:
         overlap = min(reference_seg.end, seg.end) - max(
             reference_seg.start, seg.start
@@ -360,7 +295,7 @@ def _collect_reference_prompt_text(
 
     if overlapped:
         overlapped.sort(key=lambda item: item[1].start)
-        texts = [normalize_spaces(seg.text_en) for _, seg in overlapped]
+        texts = [normalize_spaces(seg.text_src) for _, seg in overlapped]
         return normalize_spaces(" ".join(t for t in texts if t))
 
     if not segments:
@@ -371,4 +306,4 @@ def _collect_reference_prompt_text(
         segments,
         key=lambda seg: abs(((seg.start + seg.end) / 2.0) - ref_center),
     )
-    return normalize_spaces(nearest.text_en)
+    return normalize_spaces(nearest.text_src)

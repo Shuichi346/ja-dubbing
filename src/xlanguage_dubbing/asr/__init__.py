@@ -17,11 +17,7 @@ def get_asr_engine() -> str:
 
 
 def transcribe_reference_audio(wav_path: Path, language: str = "") -> str:
-    """
-    参照音声ファイルを文字起こしする統一エントリポイント。
-    ASR_ENGINE の設定に応じて whisper.cpp または VibeVoice を使用する。
-    失敗時は空文字列を返す。
-    """
+    """参照音声ファイルを文字起こしする統一エントリポイント。"""
     engine = get_asr_engine()
 
     if engine == "vibevoice":

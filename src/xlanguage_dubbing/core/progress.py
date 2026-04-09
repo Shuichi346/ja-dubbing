@@ -30,7 +30,7 @@ class ProgressStore:
         self.path = path
         self.video_path = video_path
         self.data: Dict[str, Any] = {
-            "version": 8,
+            "version": 9,
             "video": video_signature(video_path),
             "steps": {
                 "probe_done": False,

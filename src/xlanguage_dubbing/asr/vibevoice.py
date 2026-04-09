@@ -3,9 +3,7 @@
 """
 VibeVoice-ASR（Microsoft 製、mlx-audio 経由）による音声認識処理。
 文字起こし・話者分離・タイムスタンプを1パスで出力する。
-
-メモリ最適化: エンコーダをチャンク単位で実行し、
-Mac Mini 24GB ユニファイドメモリでもメモリスパイクを回避する。
+コードスイッチング対応。多言語混在音声を問題なく処理できる。
 """
 
 from __future__ import annotations
@@ -32,20 +30,10 @@ from xlanguage_dubbing.config import (
 from xlanguage_dubbing.core.models import DiarizationSegment, Segment
 from xlanguage_dubbing.utils import PipelineError, print_step
 
-# モデルの遅延ロード用グローバルキャッシュ
 _VIBEVOICE_MODEL = None
-
-# 非音声タグのパターン（[Music], [Noise], [Environmental Sounds], [Speech] など）
 _NON_SPEECH_PATTERN = re.compile(r"^\[.*\]$")
-
-# VibeVoice エンコーダの定数（VIBEVOICE_SAMPLE_RATE は config.py で定義）
 _SAMPLE_RATE = VIBEVOICE_SAMPLE_RATE
 _HOP_LENGTH = 3200
-
-
-# ================================================================
-# モデル管理
-# ================================================================
 
 
 def _load_model_func():
@@ -62,13 +50,12 @@ def _load_model_func():
     except ImportError as exc:
         raise PipelineError(
             "mlx-audio[stt] がインストールされていません。\n"
-            "VibeVoice-ASR を使うには以下を実行してください:\n"
-            "  uv pip install 'mlx-audio[stt]>=0.3.0'\n"
+            "  uv sync を実行してください。\n"
         ) from exc
 
 
 def _get_vibevoice_model():
-    """VibeVoice-ASR モデルを遅延ロードする（メモリ上限設定付き）。"""
+    """VibeVoice-ASR モデルを遅延ロードする。"""
     global _VIBEVOICE_MODEL
     if _VIBEVOICE_MODEL is not None:
         return _VIBEVOICE_MODEL
@@ -102,11 +89,6 @@ def _is_non_speech(text: str) -> bool:
     return bool(_NON_SPEECH_PATTERN.match(text.strip()))
 
 
-# ================================================================
-# メモリベースのチャンクサイズ自動決定
-# ================================================================
-
-
 def _get_available_memory_gb() -> float:
     """Metal GPU の空きメモリを GB 単位で返す。"""
     import mlx.core as mx
@@ -121,7 +103,7 @@ def _get_available_memory_gb() -> float:
 def _calculate_encoder_chunk_seconds(
     available_gb: Optional[float] = None,
 ) -> int:
-    """空きメモリに基づいてエンコーダのチャンクサイズ（秒）を決定する。"""
+    """空きメモリに基づいてチャンクサイズを決定する。"""
     if available_gb is None:
         available_gb = _get_available_memory_gb()
 
@@ -141,16 +123,8 @@ def _calculate_encoder_chunk_seconds(
     return chunk_seconds
 
 
-# ================================================================
-# チャンクエンコード（メモリ最適化の核心）
-# ================================================================
-
-
 def _chunked_encode_speech(model, audio_tensor, chunk_seconds: int) -> "mx.array":
-    """
-    音声エンコーダをチャンク単位で実行し、メモリスパイクを防ぐ。
-    各チャンクのエンコード後にキャッシュクリアする。
-    """
+    """音声エンコーダをチャンク単位で実行する。"""
     import mlx.core as mx
 
     total_samples = audio_tensor.shape[1]
@@ -224,18 +198,13 @@ def _chunked_encode_speech(model, audio_tensor, chunk_seconds: int) -> "mx.array
     return combined
 
 
-# ================================================================
-# テキスト生成（事前計算済み特徴量を使用）
-# ================================================================
-
-
 def _generate_with_precomputed_features(
     model,
     speech_features,
     audio_duration: float,
     context: Optional[str] = None,
 ) -> dict:
-    """事前計算済みの speech_features を使って LLM でテキスト生成する。"""
+    """事前計算済みの speech_features を使ってテキスト生成する。"""
     import mlx.core as mx
 
     try:
@@ -243,7 +212,7 @@ def _generate_with_precomputed_features(
     except ImportError as exc:
         raise PipelineError(
             "mlx-lm がインストールされていません。\n"
-            "  uv pip install 'mlx-audio[stt]>=0.3.0'\n"
+            "  uv sync を実行してください。\n"
         ) from exc
 
     print_step(
@@ -300,11 +269,6 @@ def _generate_with_precomputed_features(
     }
 
 
-# ================================================================
-# 短い音声向けの通常の generate 呼び出し
-# ================================================================
-
-
 def _generate_standard(model, wav_path: Path) -> dict:
     """短い音声ファイルを通常の model.generate() で処理する。"""
     gen_kwargs = {
@@ -322,20 +286,10 @@ def _generate_standard(model, wav_path: Path) -> dict:
     return result
 
 
-# ================================================================
-# メイン関数
-# ================================================================
-
-
 def vibevoice_transcribe(
     wav_path: Path,
 ) -> Tuple[List[Segment], List[DiarizationSegment]]:
-    """
-    VibeVoice-ASR で文字起こしと話者分離を同時に実行する。
-
-    音声が長い場合はチャンクエンコード方式でメモリ最適化を行う。
-    短い音声の場合は通常の generate() を使用する。
-    """
+    """VibeVoice-ASR で文字起こしと話者分離を同時に実行する。"""
     model = _get_vibevoice_model()
 
     print_step(f"  VibeVoice-ASR 実行中: {wav_path.name}")
@@ -359,7 +313,7 @@ def vibevoice_transcribe(
     )
 
     if audio_duration <= chunk_seconds:
-        print_step("    通常の generate() を使用（音声がチャンクサイズ以下）")
+        print_step("    通常の generate() を使用")
         del audio_tensor
         mx.metal.clear_cache()
         gc.collect()
@@ -398,7 +352,6 @@ def vibevoice_transcribe(
     if not segments:
         raise PipelineError(
             "VibeVoice-ASR: 文字起こし結果が空です。"
-            "音声ファイルに発話が含まれていない可能性があります。"
         )
 
     speaker_ids = sorted(set(s.speaker_id for s in segments))
@@ -449,7 +402,7 @@ def _parse_vibevoice_segments(
                 idx=idx,
                 start=start,
                 end=end,
-                text_en=text,
+                text_src=text,
                 speaker_id=speaker_label,
             )
         )
@@ -468,11 +421,7 @@ def _parse_vibevoice_segments(
 
 
 def transcribe_short_audio_vibevoice(wav_path: Path) -> str:
-    """
-    短い音声ファイル（参照音声等）を VibeVoice-ASR で文字起こしする。
-    全セグメントのテキストを結合して返す。
-    失敗時は空文字列を返す。
-    """
+    """短い音声ファイルを VibeVoice-ASR で文字起こしする。"""
     if not wav_path.exists():
         return ""
 
@@ -504,7 +453,7 @@ def transcribe_short_audio_vibevoice(wav_path: Path) -> str:
 
 
 def release_vibevoice_model() -> None:
-    """メモリ節約のため VibeVoice-ASR モデルを解放する。"""
+    """VibeVoice-ASR モデルを解放する。"""
     global _VIBEVOICE_MODEL
 
     if _VIBEVOICE_MODEL is not None:
