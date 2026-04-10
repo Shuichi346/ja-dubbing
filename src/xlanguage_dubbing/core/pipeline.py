@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from xlanguage_dubbing.asr import get_asr_engine
@@ -72,6 +72,18 @@ from xlanguage_dubbing.utils import (
     print_step,
     sanitize_text_for_tts,
 )
+
+
+def _fill_detected_lang(segments: list, lang: str) -> list:
+    """detected_lang が空のセグメントに検出言語を埋める。"""
+    if not lang:
+        return segments
+    result = []
+    for seg in segments:
+        if not seg.detected_lang:
+            seg = replace(seg, detected_lang=lang)
+        result.append(seg)
+    return result
 
 
 def process_one_video(
@@ -149,6 +161,9 @@ def process_one_video(
             progress.set_artifact("detected_lang", detected_lang)
             progress.save()
 
+        # 再開時もセグメントの detected_lang を埋める
+        segments_src = _fill_detected_lang(segments_src, detected_lang)
+
         if not srt_src_path.exists():
             save_srt_atomic(segments_src, srt_src_path)
 
@@ -171,6 +186,9 @@ def process_one_video(
 
             detected_lang = detect_segments_language(segments_raw, INPUT_LANG)
             progress.set_artifact("detected_lang", detected_lang)
+
+            # 各セグメントの detected_lang フィールドを埋める
+            segments_raw = _fill_detected_lang(segments_raw, detected_lang)
 
             save_srt_atomic(segments_raw, srt_src_path)
             progress.set_artifact("asr_srt", str(srt_src_path))
@@ -199,6 +217,9 @@ def process_one_video(
                     segments_raw, INPUT_LANG
                 )
             progress.set_artifact("detected_lang", detected_lang)
+
+            # Whisper セグメントの detected_lang も埋める
+            segments_raw = _fill_detected_lang(segments_raw, detected_lang)
 
             release_whisper_model()
 

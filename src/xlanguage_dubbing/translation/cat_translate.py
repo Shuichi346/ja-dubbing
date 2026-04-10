@@ -16,7 +16,6 @@ from __future__ import annotations
 import gc
 import re
 import time
-from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from typing import Optional
@@ -30,7 +29,6 @@ from xlanguage_dubbing.config import (
     CAT_TRANSLATE_RETRIES,
     CAT_TRANSLATE_RETRY_BACKOFF_SEC,
     INPUT_REPEAT_THRESHOLD,
-    INPUT_UNIQUE_RATIO_THRESHOLD,
     OUTPUT_LANG,
     OUTPUT_REPEAT_THRESHOLD,
     TRANSLATEGEMMA_RETRIES,
@@ -169,8 +167,33 @@ def release_all_translation_models() -> None:
 # =========================================================
 
 
+def _has_consecutive_repeats(phrases: list[str], threshold: int) -> bool:
+    """フレーズリスト内に連続で threshold 回以上同じフレーズがあるか検査する。
+
+    LLM が暴走して「the the the the」「ありますありますあります」のように
+    同じフレーズを連続リピートするケースのみを検出する。
+    英語の冠詞や前置詞など、文中に自然に複数回出現する単語は
+    連続でなければ正常とみなす。
+    """
+    if len(phrases) < threshold:
+        return False
+    consecutive = 1
+    for i in range(1, len(phrases)):
+        if phrases[i] == phrases[i - 1]:
+            consecutive += 1
+            if consecutive >= threshold:
+                return True
+        else:
+            consecutive = 1
+    return False
+
+
 def _detect_repeated_phrases(text: str) -> bool:
-    """翻訳結果に同一フレーズがN回以上繰り返されているか検査する。"""
+    """翻訳結果に同一フレーズが連続でN回以上繰り返されているか検査する。
+
+    「the the the」「ありますありますあります」のような LLM の暴走パターンのみ検出する。
+    文中の非連続な同一単語出現（英語の冠詞など自然な繰り返し）は検出しない。
+    """
     t = (text or "").strip()
     if not t:
         return False
@@ -181,21 +204,7 @@ def _detect_repeated_phrases(text: str) -> bool:
     if len(phrases) < OUTPUT_REPEAT_THRESHOLD:
         return False
 
-    counter = Counter(phrases)
-    most_common_count = counter.most_common(1)[0][1]
-    if most_common_count >= OUTPUT_REPEAT_THRESHOLD:
-        return True
-
-    consecutive = 1
-    for i in range(1, len(phrases)):
-        if phrases[i] == phrases[i - 1]:
-            consecutive += 1
-            if consecutive >= OUTPUT_REPEAT_THRESHOLD:
-                return True
-        else:
-            consecutive = 1
-
-    return False
+    return _has_consecutive_repeats(phrases, OUTPUT_REPEAT_THRESHOLD)
 
 
 def is_translation_glitch(text: str) -> bool:
@@ -214,7 +223,11 @@ def _is_translation_error_placeholder(text: str) -> bool:
 
 
 def _is_repetitive_input(text: str) -> bool:
-    """入力テキストが繰り返しで翻訳不要かを判定する。"""
+    """入力テキストが連続繰り返しで翻訳不要かを判定する。
+
+    LLM の暴走による連続リピートのみを検出する。
+    文中に自然に同じ単語が複数回出現するケースは正常とみなす。
+    """
     t = (text or "").strip()
     if not t:
         return True
@@ -227,17 +240,9 @@ def _is_repetitive_input(text: str) -> bool:
     if len(phrases) <= 2:
         return False
 
-    unique_phrases = set(p.strip().lower() for p in phrases)
-    unique_ratio = len(unique_phrases) / len(phrases)
-    if unique_ratio < INPUT_UNIQUE_RATIO_THRESHOLD:
-        return True
-
-    counter = Counter(p.strip().lower() for p in phrases)
-    most_common_count = counter.most_common(1)[0][1]
-    if most_common_count >= INPUT_REPEAT_THRESHOLD:
-        return True
-
-    return False
+    # 連続出現のみ検出する
+    phrases_lower = [p.strip().lower() for p in phrases]
+    return _has_consecutive_repeats(phrases_lower, INPUT_REPEAT_THRESHOLD)
 
 
 # =========================================================
