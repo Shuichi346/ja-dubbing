@@ -14,6 +14,7 @@ from xlanguage_dubbing.config import (
     INPUT_LANG,
     OUTPUT_LANG,
     TEMP_ROOT,
+    TTS_ENGINE,
     VIDEO_EXTS,
     VIDEO_FOLDER,
 )
@@ -82,6 +83,9 @@ def preflight_checks() -> None:
 
     print_step(f"  入力言語: {INPUT_LANG}")
     print_step(f"  出力言語: {OUTPUT_LANG}")
+
+    tts_name = "VoxCPM2" if TTS_ENGINE == "voxcpm2" else "OmniVoice"
+    print_step(f"  TTS エンジン: {tts_name}")
 
     try:
         import torch

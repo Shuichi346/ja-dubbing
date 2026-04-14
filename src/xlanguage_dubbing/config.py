@@ -75,6 +75,12 @@ OUTPUT_LANG = _env("OUTPUT_LANG", "ja").strip().lower()
 ASR_ENGINE = _env("ASR_ENGINE", "vibevoice")  # "vibevoice" or "whisper"
 
 # =========================
+# TTS共通
+# =========================
+
+TTS_ENGINE = _env("TTS_ENGINE", "omnivoice").strip().lower()  # "omnivoice" or "voxcpm2"
+
+# =========================
 # whisper.cpp（CLIバイナリ + VAD）
 # =========================
 
@@ -164,6 +170,22 @@ OMNIVOICE_REFERENCE_TARGET_SEC = _env_float("OMNIVOICE_REFERENCE_TARGET_SEC", 8.
 OMNIVOICE_DURATION_TOLERANCE = _env_float("OMNIVOICE_DURATION_TOLERANCE", 0.5)
 OMNIVOICE_QUALITY_RETRIES = _env_int("OMNIVOICE_QUALITY_RETRIES", 2)
 OMNIVOICE_SAMPLE_RATE = 24000
+
+# =========================
+# VoxCPM2（30言語・48kHz ボイスクローン TTS）
+# =========================
+
+VOXCPM2_MODEL = _env("VOXCPM2_MODEL", "openbmb/VoxCPM2")
+VOXCPM2_CFG_VALUE = _env_float("VOXCPM2_CFG_VALUE", 2.0)
+VOXCPM2_INFERENCE_TIMESTEPS = _env_int("VOXCPM2_INFERENCE_TIMESTEPS", 10)
+VOXCPM2_DURATION_SCALE = _env_float("VOXCPM2_DURATION_SCALE", 1.15)
+VOXCPM2_REFERENCE_MIN_SEC = _env_float("VOXCPM2_REFERENCE_MIN_SEC", 3.0)
+VOXCPM2_REFERENCE_MAX_SEC = _env_float("VOXCPM2_REFERENCE_MAX_SEC", 30.0)
+VOXCPM2_REFERENCE_TARGET_SEC = _env_float("VOXCPM2_REFERENCE_TARGET_SEC", 10.0)
+VOXCPM2_DURATION_TOLERANCE = _env_float("VOXCPM2_DURATION_TOLERANCE", 0.5)
+VOXCPM2_QUALITY_RETRIES = _env_int("VOXCPM2_QUALITY_RETRIES", 2)
+# VoxCPM2 のネイティブ出力サンプルレート（48kHz）
+VOXCPM2_SAMPLE_RATE = 48000
 
 # =========================
 # 音声設定（最終出力ミックス用）
