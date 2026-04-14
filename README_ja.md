@@ -9,11 +9,11 @@
 
 <p align="center">
   <h1 align="center">xlanguage-dubbing</h1>
-  <p align="center">多言語動画を他言語吹き替え動画に変換するツールです。<br>高精度な音声クローニングを使って、元の話者の声を再現した吹き替えを作成します。</p>
+  <p align="center">多言語動画を他の言語の吹き替え動画に変換するツール。<br>高精度音声クローニングを使用して、元話者の声を再現した吹き替えを作成します。</p>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-8.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-9.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
@@ -23,16 +23,17 @@
 
 ## このツールでできること
 
-- 多言語の動画を入力して他言語の吹き替え動画を出力
-- 高精度音声クローニング（OmniVoice）を使用した元話者の声を模倣した吹き替えの作成
-- 日英・英日翻訳は高精度な CAT-Translate-7b、それ以外は 55 言語対応の TranslateGemma-12b-it を自動選択
-- 自然な吹き替えのための動画速度の自動調整
-- 処理が途中で止まっても続きから再開
+- 多言語動画を入力し、他の言語の吹き替え動画を出力
+- 高精度音声クローニングを使用して、元話者の声を模倣した吹き替えを作成
+- 2つのTTSエンジンから選択：OmniVoiceまたはVoxCPM2（30言語、48kHz、Ultimate Cloning）
+- 日本語-英語および英語-日本語翻訳には高精度なCAT-Translate-7bを、その他の言語ペアには55言語対応のTranslateGemma-12b-itを自動選択
+- 自然な吹き替えのための動画速度自動調整
+- 処理が中断されても途中から再開可能
 
 ### デモ動画
 
 <a href="https://www.youtube.com/watch?v=amYVIorgOQQ">
-  <img src="https://img.youtube.com/vi/amYVIorgOQQ/0.jpg" width="250" alt="動画タイトル">
+  <img src="https://img.youtube.com/vi/amYVIorgOQQ/0.jpg" width="250" alt="Video Title">
 </a>
 
 ---
@@ -42,7 +43,8 @@
 - [システム要件](#system-requirements)
 - [セットアップ](#setup)
 - [使用方法](#usage)
-- [ASRエンジンの選択](#asr-engines)
+- [ASRエンジン選択](#asr-engines)
+- [TTSエンジン選択](#tts-engines)
 - [言語設定](#language-settings)
 - [設定オプション](#configuration-options)
 - [ライセンス](#license)
@@ -51,7 +53,7 @@
 
 ## システム要件
 
-- **Mac（Apple Silicon）** — Mac mini M4（24GB）でテスト済み
+- **Mac (Apple Silicon)** — Mac mini M4 (24GB)でテスト済み
 - **Python 3.13以上**
 - Linuxは未テスト
 
@@ -85,21 +87,22 @@ uv run python -m spacy download en_core_web_sm
 cp .env.example .env
 ```
 
-`.env` を編集して以下を設定してください。
+`.env`を編集して以下を設定：
 
 | 項目 | 説明 | 例 |
-|------|------|------|
-| `VIDEO_FOLDER` | 吹き替えする動画のフォルダ | `./input_videos` |
-| `INPUT_LANG` | 元動画の音声言語（`auto` で自動判定） | `auto`, `en`, `ja` |
+|------|-------------|---------|
+| `VIDEO_FOLDER` | 吹き替えする動画が入っているフォルダ | `./input_videos` |
+| `INPUT_LANG` | 元動画の音声言語（`auto`で自動検出） | `auto`, `en`, `ja` |
 | `OUTPUT_LANG` | 出力する吹き替え言語 | `ja`, `en`, `fr` |
 | `ASR_ENGINE` | 音声認識エンジン | `vibevoice`（推奨）, `whisper` |
+| `TTS_ENGINE` | 音声合成エンジン | `omnivoice`（デフォルト）, `voxcpm2` |
 | `HF_AUTH_TOKEN` | HuggingFaceトークン（whisper使用時のみ） | `hf_xxxxxxxxxxxx` |
 
 ### 5. ASRエンジンのセットアップ
 
-#### VibeVoiceモード（デフォルト・推奨）
+#### VibeVoiceモード（デフォルト/推奨）
 
-追加セットアップ不要です。初回実行時にモデルが自動ダウンロードされます。
+追加セットアップは不要。初回実行時にモデルが自動ダウンロードされます。
 
 #### Whisperモード
 
@@ -116,14 +119,30 @@ uv run xlanguage-dubbing
 
 ---
 
-## ASRエンジンの選択
+## ASRエンジン選択
 
 | | VibeVoice（推奨） | Whisper |
 |---|---|---|
-| 速度 | 低速 | 高速 |
-| 多言語混在（コードスイッチング） | 対応 | 非対応（1言語のみ） |
-| 追加セットアップ | 不要 | `setup_whisper.sh` 実行が必要 |
+| 速度 | 遅い | 速い |
+| 多言語混合（コードスイッチング） | 対応 | 非対応（単一言語のみ） |
+| 追加セットアップ | 不要 | `setup_whisper.sh`の実行が必要 |
 | HuggingFaceトークン | 不要 | 必要 |
+
+---
+
+## TTSエンジン選択
+
+`.env`の`TTS_ENGINE`変数を設定して音声合成エンジンを選択します。
+
+| | OmniVoice（デフォルト） | VoxCPM2 |
+|---|---|---|
+| 言語 | 600+ | 30 |
+| 出力サンプルレート | 24kHz | 48kHz |
+| モデルサイズ | 小 | 2Bパラメータ |
+| クローニングモード | 音声クローニング | Ultimate Cloning（参照音声＋転写） |
+| 長さ制御 | 対応（目標時間） | 直接対応なし（自然な長さ） |
+| VRAM使用量 | 少 | ~8GB |
+| 設定 | `TTS_ENGINE=omnivoice` | `TTS_ENGINE=voxcpm2` |
 
 ---
 
@@ -131,38 +150,38 @@ uv run xlanguage-dubbing
 
 ### INPUT_LANG
 
-元の動画の音声言語を指定します。`auto` に設定すると ASR エンジンが自動で判定します。VibeVoice-ASR はコードスイッチング対応のため、1つの動画内に複数言語が混在していても問題なく処理できます。
+元動画の音声言語を指定します。`auto`に設定すると、ASRエンジンが自動検出します。VibeVoice-ASRはコードスイッチングに対応しているため、単一動画内で複数言語が混在していても問題なく処理できます。
 
 ### OUTPUT_LANG
 
-出力される吹き替え動画の音声言語を明示的に指定します。ISO 639-1 コード（`en`, `ja`, `fr`, `de`, `zh`, `ko` など）で指定してください。
+出力する吹き替え動画の音声言語を明示的に指定します。ISO 639-1コード（`en`, `ja`, `fr`, `de`, `zh`, `ko`など）を使用してください。
 
-### 翻訳エンジンの自動選択
+### 自動翻訳エンジン選択
 
-入出力言語の組み合わせに応じて、最適な翻訳エンジンが自動的に選択されます。
+入出力言語の組み合わせに基づいて、最適な翻訳エンジンが自動選択されます。
 
 | 言語ペア | 使用エンジン | 備考 |
 |---|---|---|
-| 英語 → 日本語 | CAT-Translate-7b | 日英特化・高精度 |
-| 日本語 → 英語 | CAT-Translate-7b | 日英特化・高精度 |
+| 英語 → 日本語 | CAT-Translate-7b | 日英専門、高精度 |
+| 日本語 → 英語 | CAT-Translate-7b | 日英専門、高精度 |
 | その他すべて | TranslateGemma-12b-it | 55言語対応 |
 
 ---
 
 ## 設定オプション
 
-すべての設定は `.env` ファイルで管理されます。詳細は `.env.example` を参照してください。
+すべての設定は`.env`ファイルで管理されています。詳細は`.env.example`を参照してください。
 
 ---
 
 ## 再開機能
 
-処理は各ステップでチェックポイントを保存するため、途中で止まっても `uv run xlanguage-dubbing` を再実行すれば続きから処理できます。
+処理は各ステップでチェックポイントを保存するため、途中で停止しても`uv run xlanguage-dubbing`を再実行することで途中から再開できます。
 
-**最初からやり直したい場合**: `temp/<動画名>/` フォルダを削除して再実行。
+**最初からやり直したい場合**：`temp/<動画名>/`フォルダを削除して再実行してください。
 
 ## ライセンス
 
 MIT License
 
-このツールが使用する外部モデルやライブラリはそれぞれ独自のライセンスを持ちます。
+このツールで使用される外部モデルやライブラリは、それぞれのライセンスに従います。

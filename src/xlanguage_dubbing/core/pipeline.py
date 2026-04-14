@@ -40,6 +40,7 @@ from xlanguage_dubbing.config import (
     SPACY_UNIT_MAX_SENTENCES,
     SPACY_UNIT_MERGE_MAX_CHARS,
     SPACY_UNIT_MERGE_MAX_GAP_SEC,
+    TTS_ENGINE,
 )
 from xlanguage_dubbing.core.models import TtsMeta
 from xlanguage_dubbing.core.progress import ProgressStore
@@ -72,6 +73,18 @@ from xlanguage_dubbing.utils import (
     print_step,
     sanitize_text_for_tts,
 )
+
+
+def _get_tts_engine_name() -> str:
+    """TTS エンジン名を返す。"""
+    return TTS_ENGINE
+
+
+def _get_tts_engine_display_name() -> str:
+    """TTS エンジンの表示名を返す。"""
+    if TTS_ENGINE == "voxcpm2":
+        return "VoxCPM2"
+    return "OmniVoice"
 
 
 def _fill_detected_lang(segments: list, lang: str) -> list:
@@ -117,8 +130,9 @@ def process_one_video(
     ensure_dir(seg_audio_dir)
 
     asr_engine = get_asr_engine()
+    tts_display = _get_tts_engine_display_name()
     print_step(f"ASR エンジン: {asr_engine}")
-    print_step("TTS エンジン: OmniVoice")
+    print_step(f"TTS エンジン: {tts_display}")
 
     # ===== 0. 動画尺 =====
     print_step("0. 動画尺を取得(ffprobe)")
@@ -296,14 +310,14 @@ def process_one_video(
 
     # ===== 6. 話者リファレンス音声生成 =====
     if diarization is not None:
-        print_step("6. OmniVoice 用の話者代表リファレンス音声を抽出")
+        print_step(f"6. {tts_display} 用の話者代表リファレンス音声を抽出")
         ref_cache.build_omnivoice_references(
             video_path, diarization, segments_src
         )
     else:
         _reload_cached_references(ref_cache, segments_src)
 
-    print_step("6.5. OmniVoice セグメント単位リファレンス音声を切り出し")
+    print_step(f"6.5. {tts_display} セグメント単位リファレンス音声を切り出し")
     ref_cache.build_omnivoice_segment_references(video_path, segments_src)
 
     # ===== 7. 翻訳 =====
@@ -329,9 +343,14 @@ def process_one_video(
     force_memory_cleanup()
 
     # ===== 8. TTS =====
-    _run_tts_omnivoice(
-        segments_translated, seg_audio_dir, work_dir, progress, ref_cache
-    )
+    if _get_tts_engine_name() == "voxcpm2":
+        _run_tts_voxcpm2(
+            segments_translated, seg_audio_dir, work_dir, progress, ref_cache
+        )
+    else:
+        _run_tts_omnivoice(
+            segments_translated, seg_audio_dir, work_dir, progress, ref_cache
+        )
 
     force_memory_cleanup()
 
@@ -605,6 +624,46 @@ def _run_tts_omnivoice(
         )
     finally:
         release_omnivoice_model()
+        force_memory_cleanup()
+
+
+def _run_tts_voxcpm2(
+    segments_translated, seg_audio_dir, work_dir, progress, ref_cache,
+):
+    """VoxCPM2 で TTS を実行する。"""
+    from xlanguage_dubbing.voxcpm2_tts import (
+        generate_segment_tts_voxcpm2,
+        release_voxcpm2_model,
+    )
+
+    print_step("8. VoxCPM2 でボイスクローン音声生成（Ultimate Cloning）")
+
+    try:
+        def _build_segment_label(segno, total, seg):
+            has_seg_ref = (
+                ref_cache.get_omnivoice_segment_reference_path(segno) is not None
+            )
+            ref_type = "セグメント単位" if has_seg_ref else "話者代表"
+            return (
+                f"  TTS seg {segno}/{total}: {seg.start:.3f}-{seg.end:.3f} "
+                f"speaker={seg.speaker_id} ref={ref_type} (VoxCPM2)"
+            )
+
+        def _generate(seg, out_audio_stub, segno):
+            return generate_segment_tts_voxcpm2(
+                seg, out_audio_stub, ref_cache, segno=segno
+            )
+
+        _run_tts_loop(
+            segments_translated=segments_translated,
+            seg_audio_dir=seg_audio_dir,
+            work_dir=work_dir,
+            progress=progress,
+            segment_label_builder=_build_segment_label,
+            generator=_generate,
+        )
+    finally:
+        release_voxcpm2_model()
         force_memory_cleanup()
 
 

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-8.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-9.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
   <img src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
@@ -24,7 +24,8 @@
 ## What this tool can do
 
 - Input multilingual videos and output dubbed videos in other languages
-- Create dubbing that mimics the original speaker's voice using high-precision voice cloning (OmniVoice)
+- Create dubbing that mimics the original speaker's voice using high-precision voice cloning
+- Choose between two TTS engines: OmniVoice or VoxCPM2 (30 languages, 48kHz, Ultimate Cloning)
 - Automatically selects high-precision CAT-Translate-7b for Japanese-English and English-Japanese translation, and TranslateGemma-12b-it supporting 55 languages for other language pairs
 - Automatic video speed adjustment for natural dubbing
 - Resume from where it left off even if processing is interrupted
@@ -43,6 +44,7 @@
 - [Setup](#setup)
 - [Usage](#usage)
 - [ASR Engine Selection](#asr-engines)
+- [TTS Engine Selection](#tts-engines)
 - [Language Settings](#language-settings)
 - [Configuration Options](#configuration-options)
 - [License](#license)
@@ -93,6 +95,7 @@ Edit `.env` to configure the following:
 | `INPUT_LANG` | Audio language of original video (`auto` for auto-detection) | `auto`, `en`, `ja` |
 | `OUTPUT_LANG` | Output dubbing language | `ja`, `en`, `fr` |
 | `ASR_ENGINE` | Speech recognition engine | `vibevoice` (recommended), `whisper` |
+| `TTS_ENGINE` | Voice synthesis engine | `omnivoice` (default), `voxcpm2` |
 | `HF_AUTH_TOKEN` | HuggingFace token (only when using whisper) | `hf_xxxxxxxxxxxx` |
 
 ### 5. ASR Engine Setup
@@ -124,6 +127,22 @@ uv run xlanguage-dubbing
 | Multilingual mixing (Code-switching) | Supported | Not supported (single language only) |
 | Additional setup | Not required | Requires running `setup_whisper.sh` |
 | HuggingFace token | Not required | Required |
+
+---
+
+## TTS Engine Selection
+
+Set the `TTS_ENGINE` variable in `.env` to select the voice synthesis engine.
+
+| | OmniVoice (Default) | VoxCPM2 |
+|---|---|---|
+| Languages | 600+ | 30 |
+| Output sample rate | 24kHz | 48kHz |
+| Model size | Small | 2B parameters |
+| Cloning mode | Voice cloning | Ultimate Cloning (ref audio + transcript) |
+| Duration control | Supported (target duration) | Not directly supported (natural length) |
+| VRAM usage | Low | ~8GB |
+| Setup | `TTS_ENGINE=omnivoice` | `TTS_ENGINE=voxcpm2` |
 
 ---
 

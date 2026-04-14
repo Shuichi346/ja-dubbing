@@ -1,5 +1,25 @@
 # Changelog
 
+## [9.0.0] - 2026-04-14
+
+### Added
+
+- VoxCPM2 — 2B モデルによる TTS エンジンを追加
+  - 30言語対応・48kHz ネイティブ出力
+  - Ultimate Cloning モード（参照音声＋参照テキストで最高品質クローン）
+  - MPS / CPU 対応（Apple Silicon Mac で動作可能）
+- `TTS_ENGINE` 環境変数を追加（`omnivoice` または `voxcpm2` を選択）
+- `src/xlanguage_dubbing/voxcpm2_tts.py` を新規追加
+- VoxCPM2 関連の設定値を `.env.example` および `config.py` に追加
+
+### Changed
+
+- Python バージョン要件を `>=3.13` → `>=3.12` に変更（VoxCPM2 の依存関係との互換性のため）
+- `pipeline.py` を TTS エンジン切り替え対応に拡張
+- `cli.py` に TTS エンジン表示を追加
+- `pyproject.toml` に `voxcpm` パッケージを依存に追加
+- バージョンを 8.0.0 → 9.0.0 に更新
+
 ## [8.0.0] - 2026-04-09
 
 ### Added
