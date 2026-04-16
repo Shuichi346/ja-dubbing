@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 
 from xlanguage_dubbing.audio.ffmpeg import ffprobe_duration_sec
@@ -112,6 +113,15 @@ def release_omnivoice_model() -> None:
     print_step("  OmniVoice モデルを解放しました")
 
 
+def _to_numpy(waveform) -> np.ndarray:
+    """torch.Tensor / numpy.ndarray / その他を 1D numpy float32 に変換する。"""
+    if isinstance(waveform, torch.Tensor):
+        return waveform.squeeze().detach().cpu().float().numpy()
+    if isinstance(waveform, np.ndarray):
+        return waveform.squeeze().astype(np.float32)
+    return np.array(waveform, dtype=np.float32).squeeze()
+
+
 def omnivoice_synthesize(
     text: str,
     out_wav: Path,
@@ -148,9 +158,11 @@ def omnivoice_synthesize(
         raise PipelineError("OmniVoice: 生成音声が空です。")
 
     if len(audio_list) == 1:
-        waveform = audio_list[0]
+        wav_np = _to_numpy(audio_list[0])
     else:
-        waveform = torch.cat(audio_list, dim=-1)
+        wav_np = np.concatenate(
+            [_to_numpy(a) for a in audio_list], axis=-1
+        )
 
     try:
         import soundfile as sf
@@ -160,8 +172,12 @@ def omnivoice_synthesize(
             "  uv sync を実行してください。"
         ) from exc
 
-    wav_np = waveform.squeeze().detach().cpu().float().numpy()
-    sf.write(str(out_wav), wav_np, OMNIVOICE_SAMPLE_RATE)
+    # サンプルレートをモデルから動的に取得する（フォールバック: 設定値）
+    sample_rate = OMNIVOICE_SAMPLE_RATE
+    if hasattr(model, "sampling_rate") and model.sampling_rate:
+        sample_rate = int(model.sampling_rate)
+
+    sf.write(str(out_wav), wav_np, sample_rate)
 
 
 def _convert_to_flac(in_wav: Path, out_flac: Path) -> None:

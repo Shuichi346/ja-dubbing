@@ -1,5 +1,15 @@
 # Changelog
 
+## [9.0.2] - 2026-04-16
+
+### Fixed
+
+- OmniVoice TTS エンジンで全セグメントが `'numpy.ndarray' object has no attribute 'detach'` エラーで失敗するバグを修正
+  - OmniVoice の `model.generate()` は `list[np.ndarray]` を返すが、旧コードは `torch.Tensor` を前提に `.detach().cpu().float().numpy()` を呼んでいた
+  - 型安全な `_to_numpy()` ヘルパーを追加し、`torch.Tensor` / `np.ndarray` / その他すべてに対応
+  - 複数波形の結合を `torch.cat` から `np.concatenate` に修正
+  - モデルの `sampling_rate` 属性からサンプルレートを動的に取得するよう改善
+
 ## [9.0.1] - 2026-04-14
 
 ### Fixed
