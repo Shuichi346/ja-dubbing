@@ -34,6 +34,7 @@ from xlanguage_dubbing.config import (
     INPUT_LANG,
     KEEP_TEMP,
     MIN_SEGMENT_SEC,
+    ORIGINAL_VOLUME,
     OUTPUT_LANG,
     OUTPUT_SUFFIX,
     SPACY_CHUNK_GAP_SEC,
@@ -511,12 +512,16 @@ def process_one_video(
     if progress.step("mux_done") and out_path.exists():
         print_step(f"=== 完了（mux済み）: {out_path} ===")
     else:
-        print_step("10. リタイム済み映像 + 吹き替え音声（+元音声薄く）を合成")
+        background_mix_volume = 1.0 if ENABLE_AUDIO_SEPARATION else ORIGINAL_VOLUME
+        mix_label = "背景音声" if ENABLE_AUDIO_SEPARATION else "元音声薄く"
+        print_step(f"10. リタイム済み映像 + 吹き替え音声（+{mix_label}）を合成")
+        print_step(f"    背景/元音声ミックス音量: {background_mix_volume:.2f}")
         mux_retimed_video_with_tracks(
             video_retimed_mp4,
             dubbed_full_flac,
             out_path,
             original_flac=original_retimed_flac,
+            original_volume=background_mix_volume,
         )
         progress.set_step("mux_done", True)
         progress.save()
