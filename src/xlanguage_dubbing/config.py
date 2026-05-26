@@ -75,6 +75,13 @@ OUTPUT_LANG = _env("OUTPUT_LANG", "ja").strip().lower()
 ASR_ENGINE = _env("ASR_ENGINE", "vibevoice")  # "vibevoice" or "whisper"
 
 # =========================
+# 音声分離（Demucs）
+# =========================
+
+ENABLE_AUDIO_SEPARATION = _env_bool("ENABLE_AUDIO_SEPARATION", True)
+DEMUCS_MODEL = _env("DEMUCS_MODEL", "htdemucs_ft").strip() or "htdemucs_ft"
+
+# =========================
 # TTS共通
 # =========================
 

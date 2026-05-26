@@ -25,6 +25,7 @@
 
 - 多言語動画を入力し、他の言語の吹き替え動画を出力
 - 高精度音声クローニングを使用して、元話者の声を模倣した吹き替えを作成
+- Demucsで人声と背景音を分離し、ASR/TTSは人声だけを処理してから背景音と再合成
 - 2つのTTSエンジンから選択：OmniVoiceまたはVoxCPM2（30言語、48kHz、Ultimate Cloning）
 - 日本語-英語および英語-日本語翻訳には高精度なCAT-Translate-7bを、その他の言語ペアには55言語対応のTranslateGemma-12b-itを自動選択
 - 自然な吹き替えのための動画速度自動調整
@@ -78,6 +79,7 @@ cd xlanguage-dubbing
 
 ```bash
 uv sync
+uv pip install demucs
 uv run python -m spacy download en_core_web_sm
 ```
 
@@ -95,6 +97,8 @@ cp .env.example .env
 | `INPUT_LANG` | 元動画の音声言語（`auto`で自動検出） | `auto`, `en`, `ja` |
 | `OUTPUT_LANG` | 出力する吹き替え言語 | `ja`, `en`, `fr` |
 | `ASR_ENGINE` | 音声認識エンジン | `vibevoice`（推奨）, `whisper` |
+| `ENABLE_AUDIO_SEPARATION` | Demucsで人声/背景音分離を使用するか | `true` |
+| `DEMUCS_MODEL` | 人声/背景音の分離モデル | `htdemucs_ft` |
 | `TTS_ENGINE` | 音声合成エンジン | `omnivoice`（デフォルト）, `voxcpm2` |
 | `HF_AUTH_TOKEN` | HuggingFaceトークン（whisper使用時のみ） | `hf_xxxxxxxxxxxx` |
 

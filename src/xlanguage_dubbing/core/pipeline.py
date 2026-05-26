@@ -12,6 +12,7 @@ from pathlib import Path
 
 from xlanguage_dubbing.asr import get_asr_engine
 from xlanguage_dubbing.asr.whisper import extract_wav_for_whisper
+from xlanguage_dubbing.audio.demucs import separate_voice_and_background
 from xlanguage_dubbing.audio.ffmpeg import (
     concat_audio_to_flac,
     concat_ts_files,
@@ -29,9 +30,11 @@ from xlanguage_dubbing.audio.segment_io import (
     save_srt_atomic,
 )
 from xlanguage_dubbing.config import (
+    ENABLE_AUDIO_SEPARATION,
     INPUT_LANG,
     KEEP_TEMP,
     MIN_SEGMENT_SEC,
+    ORIGINAL_VOLUME,
     OUTPUT_LANG,
     OUTPUT_SUFFIX,
     SPACY_CHUNK_GAP_SEC,
@@ -50,6 +53,10 @@ from xlanguage_dubbing.lang_utils import (
     get_lang_name,
     select_translation_engine,
 )
+from xlanguage_dubbing.omnivoice_tts import (
+    load_tts_meta,
+    save_tts_meta_atomic,
+)
 from xlanguage_dubbing.segments.merge import merge_segments
 from xlanguage_dubbing.segments.sentence import merge_sentence_units
 from xlanguage_dubbing.segments.spacy_split import (
@@ -60,10 +67,6 @@ from xlanguage_dubbing.translation.cat_translate import (
     CatTranslateClient,
     release_all_translation_models,
     translate_segments_resumable,
-)
-from xlanguage_dubbing.omnivoice_tts import (
-    load_tts_meta,
-    save_tts_meta_atomic,
 )
 from xlanguage_dubbing.tts.reference import SpeakerReferenceCache
 from xlanguage_dubbing.utils import (
@@ -120,7 +123,11 @@ def process_one_video(
     progress.load()
     progress.save()
 
-    wav_whisper = work_dir / "audio_whisper_16k.wav"
+    wav_whisper = work_dir / (
+        "audio_voice_16k.wav"
+        if ENABLE_AUDIO_SEPARATION
+        else "audio_original_16k.wav"
+    )
 
     seg_json_src = work_dir / "segments_src.json"
     seg_json_translated = work_dir / "segments_translated.json"
@@ -152,12 +159,52 @@ def process_one_video(
         progress.save()
         print_step(f"   動画尺: {video_dur:.3f} sec")
 
-    # ===== 1. 音声抽出 =====
-    if not wav_whisper.exists():
-        print_step("1. ffmpegで音声抽出（16kHz mono wav）")
-        extract_wav_for_whisper(video_path, wav_whisper)
+    has_audio = ffprobe_has_audio(video_path)
+    if not has_audio:
+        raise PipelineError("入力動画に音声トラックがありません。")
+
+    # ===== 1. 音声入力準備 =====
+    if ENABLE_AUDIO_SEPARATION:
+        if (
+            progress.step("demucs_done")
+            and progress.data.get("artifacts", {}).get("voice_audio_wav")
+            and progress.data.get("artifacts", {}).get("background_audio_wav")
+        ):
+            voice_audio_path = Path(progress.data["artifacts"]["voice_audio_wav"])
+            background_audio_path = Path(
+                progress.data["artifacts"]["background_audio_wav"]
+            )
+            if voice_audio_path.exists() and background_audio_path.exists():
+                print_step("1. Demucs音声分離: 既に完了（再開）")
+            else:
+                voice_audio_path, background_audio_path = (
+                    separate_voice_and_background(video_path, work_dir)
+                )
+        else:
+            voice_audio_path, background_audio_path = (
+                separate_voice_and_background(video_path, work_dir)
+            )
+
+        progress.set_artifact("voice_audio_wav", str(voice_audio_path))
+        progress.set_artifact("background_audio_wav", str(background_audio_path))
+        progress.set_step("demucs_done", True)
+        progress.save()
     else:
-        print_step("1. 既存の音声抽出 wav を利用")
+        print_step("1. Demucs音声分離: 無効（元音声を使用）")
+        voice_audio_path = video_path
+        background_audio_path = video_path
+        progress.set_artifact("voice_audio_wav", str(voice_audio_path))
+        progress.set_artifact("background_audio_wav", str(background_audio_path))
+        progress.set_step("demucs_done", False)
+        progress.save()
+
+    # ===== 1.5. 音声抽出 =====
+    if not wav_whisper.exists():
+        source_label = "分離済み音声" if ENABLE_AUDIO_SEPARATION else "元音声"
+        print_step(f"1.5. {source_label}からASR用wavを作成（16kHz mono）")
+        extract_wav_for_whisper(voice_audio_path, wav_whisper)
+    else:
+        print_step("1.5. 既存のASR用wavを利用")
 
     # ===== 2-5. 文字起こし〜セグメント加工 =====
     detected_lang = ""
@@ -312,13 +359,13 @@ def process_one_video(
     if diarization is not None:
         print_step(f"6. {tts_display} 用の話者代表リファレンス音声を抽出")
         ref_cache.build_omnivoice_references(
-            video_path, diarization, segments_src
+            voice_audio_path, diarization, segments_src
         )
     else:
         _reload_cached_references(ref_cache, segments_src)
 
     print_step(f"6.5. {tts_display} セグメント単位リファレンス音声を切り出し")
-    ref_cache.build_omnivoice_segment_references(video_path, segments_src)
+    ref_cache.build_omnivoice_segment_references(voice_audio_path, segments_src)
 
     # ===== 7. 翻訳 =====
     print_step("7. 翻訳（再開対応）")
@@ -359,8 +406,6 @@ def process_one_video(
 
     # ===== 9. リタイム =====
     print_step("9. TTSに合わせて元動画の速度を区間ごとに変更")
-
-    has_audio = ffprobe_has_audio(video_path)
 
     parts, new_total_dur = build_retime_parts(
         segments_translated, tts_meta, video_dur
@@ -409,7 +454,7 @@ def process_one_video(
 
     original_retimed_flac: Path | None = None
     if has_audio:
-        print_step("   9-4. 元音声を同じ倍率でリタイムして結合")
+        print_step("   9-4. 背景音声を同じ倍率でリタイムして結合")
         orig_chunks: list[Path] = []
         for i, part in enumerate(parts, start=1):
             out_flac = orig_chunk_dir / f"orig_{i:05d}.flac"
@@ -417,7 +462,7 @@ def process_one_video(
             if out_flac.exists():
                 continue
             encode_original_audio_chunk_flac(
-                video_path, out_flac,
+                background_audio_path, out_flac,
                 start=part.orig_start, end=part.orig_end, speed=part.speed,
             )
 
@@ -429,7 +474,7 @@ def process_one_video(
             )
 
         progress.set_artifact(
-            "original_retimed_flac", str(original_retimed_flac)
+            "background_retimed_flac", str(original_retimed_flac)
         )
         progress.save()
     else:
@@ -467,12 +512,16 @@ def process_one_video(
     if progress.step("mux_done") and out_path.exists():
         print_step(f"=== 完了（mux済み）: {out_path} ===")
     else:
-        print_step("10. リタイム済み映像 + 吹き替え音声（+元音声薄く）を合成")
+        background_mix_volume = 1.0 if ENABLE_AUDIO_SEPARATION else ORIGINAL_VOLUME
+        mix_label = "背景音声" if ENABLE_AUDIO_SEPARATION else "元音声薄く"
+        print_step(f"10. リタイム済み映像 + 吹き替え音声（+{mix_label}）を合成")
+        print_step(f"    背景/元音声ミックス音量: {background_mix_volume:.2f}")
         mux_retimed_video_with_tracks(
             video_retimed_mp4,
             dubbed_full_flac,
             out_path,
             original_flac=original_retimed_flac,
+            original_volume=background_mix_volume,
         )
         progress.set_step("mux_done", True)
         progress.save()

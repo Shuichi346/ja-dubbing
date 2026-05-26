@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import multiprocessing
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 from xlanguage_dubbing.config import (
+    ENABLE_AUDIO_SEPARATION,
     INPUT_LANG,
     OUTPUT_LANG,
     TEMP_ROOT,
@@ -81,11 +83,21 @@ def preflight_checks() -> None:
     which_or_raise("ffprobe")
     ensure_dir(TEMP_ROOT)
 
+    if ENABLE_AUDIO_SEPARATION and find_spec("demucs") is None:
+        raise PipelineError(
+            "demucs がインストールされていません。\n"
+            "  uv pip install demucs を実行してください。"
+        )
+
     print_step(f"  入力言語: {INPUT_LANG}")
     print_step(f"  出力言語: {OUTPUT_LANG}")
 
     tts_name = "VoxCPM2" if TTS_ENGINE == "voxcpm2" else "OmniVoice"
     print_step(f"  TTS エンジン: {tts_name}")
+    print_step(
+        "  音声分離: "
+        f"{'Demucs 有効' if ENABLE_AUDIO_SEPARATION else '無効（元音声を使用）'}"
+    )
 
     try:
         import torch
@@ -115,7 +127,7 @@ def _process_single_video(video_path: Path) -> int:
     """動画1本を処理する。"""
     print_step(f"単体モード: {video_path.name}")
     client = CatTranslateClient()
-    work_dir = TEMP_ROOT / video_path.stem
+    work_dir = _work_dir_for_video(video_path)
     ensure_dir(work_dir)
     ref_cache = SpeakerReferenceCache(work_dir / "speaker_refs")
     try:
@@ -140,7 +152,7 @@ def _process_folder_videos(videos: list[Path]) -> int:
     failed: list[Path] = []
     for idx, v in enumerate(videos, start=1):
         print_step(f"\n[{idx}/{len(videos)}] 処理開始: {v.name}")
-        work_dir = TEMP_ROOT / v.stem
+        work_dir = _work_dir_for_video(v)
         ensure_dir(work_dir)
         ref_cache = SpeakerReferenceCache(work_dir / "speaker_refs")
         try:
@@ -161,6 +173,13 @@ def _process_folder_videos(videos: list[Path]) -> int:
 
     print_step("\n全て完了しました。")
     return 0
+
+
+def _work_dir_for_video(video_path: Path) -> Path:
+    """Keep temporary outputs separate for each audio source mode."""
+    if ENABLE_AUDIO_SEPARATION:
+        return TEMP_ROOT / video_path.stem
+    return TEMP_ROOT / f"{video_path.stem}_rawaudio"
 
 
 def main() -> int:

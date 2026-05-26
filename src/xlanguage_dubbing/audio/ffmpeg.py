@@ -284,15 +284,17 @@ def mux_retimed_video_with_tracks(
     out_mp4: Path,
     *,
     original_flac: Optional[Path],
+    original_volume: float | None = None,
 ) -> None:
     """リタイム済み映像に音声を合成する。"""
     which_or_raise("ffmpeg")
     ensure_dir(out_mp4.parent)
+    bg_volume = ORIGINAL_VOLUME if original_volume is None else float(original_volume)
 
     if original_flac and original_flac.exists():
         filter_complex = (
             f"[1:a]volume={DUBBED_VOLUME}[dubbed];"
-            f"[2:a]volume={ORIGINAL_VOLUME}[orig];"
+            f"[2:a]volume={bg_volume}[orig];"
             f"[dubbed][orig]amix=inputs=2:duration=first:normalize=0[aout]"
         )
         cmd = [
