@@ -25,6 +25,7 @@
 
 - Input multilingual videos and output dubbed videos in other languages
 - Create dubbing that mimics the original speaker's voice using high-precision voice cloning
+- Separate vocals from background audio with Demucs before ASR/TTS, then mix the dubbed voice back with the background bed
 - Choose between two TTS engines: OmniVoice or VoxCPM2 (30 languages, 48kHz, Ultimate Cloning)
 - Automatically selects high-precision CAT-Translate-7b for Japanese-English and English-Japanese translation, and TranslateGemma-12b-it supporting 55 languages for other language pairs
 - Automatic video speed adjustment for natural dubbing
@@ -78,6 +79,7 @@ cd xlanguage-dubbing
 
 ```bash
 uv sync
+uv pip install demucs
 uv run python -m spacy download en_core_web_sm
 ```
 
@@ -95,6 +97,8 @@ Edit `.env` to configure the following:
 | `INPUT_LANG` | Audio language of original video (`auto` for auto-detection) | `auto`, `en`, `ja` |
 | `OUTPUT_LANG` | Output dubbing language | `ja`, `en`, `fr` |
 | `ASR_ENGINE` | Speech recognition engine | `vibevoice` (recommended), `whisper` |
+| `ENABLE_AUDIO_SEPARATION` | Use Demucs vocal/background separation | `true` |
+| `DEMUCS_MODEL` | Voice/background separation model | `htdemucs_ft` |
 | `TTS_ENGINE` | Voice synthesis engine | `omnivoice` (default), `voxcpm2` |
 | `HF_AUTH_TOKEN` | HuggingFace token (only when using whisper) | `hf_xxxxxxxxxxxx` |
 

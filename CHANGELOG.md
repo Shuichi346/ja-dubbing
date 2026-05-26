@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added optional Demucs voice/background separation before ASR and TTS reference extraction.
+- Added `ENABLE_AUDIO_SEPARATION` and `DEMUCS_MODEL` environment settings; disabled mode keeps the previous raw-audio workflow.
+
 ## [9.0.2] - 2026-04-16
 
 ### Fixed
