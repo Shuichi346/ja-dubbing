@@ -1,157 +1,79 @@
 <table>
   <thead>
     <tr>
-      <th style="text-align:center"><a href="README.md">English</a></th>
       <th style="text-align:center"><a href="README_ja.md">日本語</a></th>
+      <th style="text-align:center"><a href="README.md">English</a></th>
     </tr>
   </thead>
 </table>
 
-<p align="center">
-  <h1 align="center">xlanguage-dubbing</h1>
-  <p align="center">A tool for converting multilingual videos into dubbed videos in other languages.<br>Creates dubbing that reproduces the original speaker's voice using high-precision voice cloning.</p>
-</p>
+# xlanguage-dubbing
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-9.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-</p>
+![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
 
----
+`xlanguage-dubbing` converts videos into dubbed videos in another language. It extracts speech, translates the transcript locally, generates dubbed speech with one of several TTS engines, retimes the video around the generated speech, and mixes the dubbed voice back with either the original audio or a Demucs-separated background track.
 
-## What this tool can do
+The project is built for local Apple Silicon workflows and is currently tested on macOS with MPS/CPU inference.
 
-- Input multilingual videos and output dubbed videos in other languages
-- Create dubbing that mimics the original speaker's voice using high-precision voice cloning
-- Separate vocals from background audio with Demucs before ASR/TTS, then mix the dubbed voice back with the background bed
-- Choose between two TTS engines: OmniVoice or VoxCPM2 (30 languages, 48kHz, Ultimate Cloning)
-- Automatically selects high-precision CAT-Translate-7b for Japanese-English and English-Japanese translation, and TranslateGemma-12b-it supporting 55 languages for other language pairs
-- Automatic video speed adjustment for natural dubbing
-- Resume from where it left off even if processing is interrupted
+## Contents
 
-### Demo Video
-
-<a href="https://www.youtube.com/watch?v=amYVIorgOQQ">
-  <img src="https://img.youtube.com/vi/amYVIorgOQQ/0.jpg" width="250" alt="Video Title">
-</a>
-
----
-
-## Table of Contents
-
-- [System Requirements](#system-requirements)
-- [Setup](#setup)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
 - [Usage](#usage)
-- [ASR Engine Selection](#asr-engines)
-- [TTS Engine Selection](#tts-engines)
-- [Language Settings](#language-settings)
-- [Configuration Options](#configuration-options)
+- [Configuration](#configuration)
+- [Engine Notes](#engine-notes)
+- [Resume and Outputs](#resume-and-outputs)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
 - [License](#license)
 
----
+## Features
 
-## System Requirements
+- Batch-process videos from a configured folder, or prompt for a single file when the folder is empty.
+- Supports multilingual ASR through VibeVoice-ASR, with optional whisper.cpp mode.
+- Uses CAT-Translate for English/Japanese pairs and TranslateGemma for other language pairs.
+- Offers three TTS modes:
+  - `omnivoice`: default voice-cloning engine.
+  - `voxcpm2`: 30-language VoxCPM2 voice cloning with reference audio and transcript.
+  - `kokoro-fastapi`: fast fixed-voice English to Japanese mode using Kokoro-FastAPI.
+- Optional Demucs vocal/background separation before ASR and TTS reference extraction.
+- Per-video checkpointing so interrupted jobs can resume.
+- Segment-level retiming and final audio/video muxing with FFmpeg.
 
-- **Mac (Apple Silicon)** — Tested on Mac mini M4 (24GB)
-- **Python 3.13 or higher**
-- Linux is untested
+## Requirements
 
----
-
-## Setup
-
-### 1. Install Required Tools
+- macOS on Apple Silicon.
+- Python 3.13 or newer.
+- Homebrew packages:
 
 ```bash
 brew install ffmpeg cmake uv
 ```
 
-### 2. Download Repository
+Linux and CUDA workflows are not supported by this repository configuration.
+
+## Installation
 
 ```bash
 git clone https://github.com/Shuichi346/xlanguage-dubbing.git
 cd xlanguage-dubbing
-```
-
-### 3. Install Dependencies
-
-```bash
 uv sync
-uv pip install demucs
-uv run python -m spacy download en_core_web_sm
-```
-
-### 4. Create Configuration File
-
-```bash
 cp .env.example .env
 ```
 
-Edit `.env` to configure the following:
+Edit `.env` before running. At minimum, set `VIDEO_FOLDER`, `INPUT_LANG`, `OUTPUT_LANG`, `ASR_ENGINE`, and `TTS_ENGINE` for your job.
 
-| Item | Description | Example |
-|------|-------------|---------|
-| `VIDEO_FOLDER` | Folder containing videos to dub | `./input_videos` |
-| `INPUT_LANG` | Audio language of original video (`auto` for auto-detection) | `auto`, `en`, `ja` |
-| `OUTPUT_LANG` | Output dubbing language | `ja`, `en`, `fr` |
-| `ASR_ENGINE` | Speech recognition engine | `vibevoice` (recommended), `whisper` |
-| `ENABLE_AUDIO_SEPARATION` | Use Demucs vocal/background separation | `true` |
-| `DEMUCS_MODEL` | Voice/background separation model | `htdemucs_ft` |
-| `TTS_ENGINE` | Voice synthesis engine | `omnivoice` (default), `voxcpm2`, `kokoro-fastapi` |
-| `HF_AUTH_TOKEN` | HuggingFace token (only when using whisper) | `hf_xxxxxxxxxxxx` |
-
-### 5. ASR Engine Setup
-
-#### VibeVoice Mode (Default/Recommended)
-
-No additional setup required. Models will be automatically downloaded on first run.
-
-#### Whisper Mode
+For whisper.cpp ASR, run the optional setup script:
 
 ```bash
 chmod +x scripts/setup_whisper.sh
 ./scripts/setup_whisper.sh
 ```
 
-### 6. Run
-
-```bash
-uv run xlanguage-dubbing
-```
-
----
-
-## ASR Engine Selection
-
-| | VibeVoice (Recommended) | Whisper |
-|---|---|---|
-| Speed | Slow | Fast |
-| Multilingual mixing (Code-switching) | Supported | Not supported (single language only) |
-| Additional setup | Not required | Requires running `setup_whisper.sh` |
-| HuggingFace token | Not required | Required |
-
----
-
-## TTS Engine Selection
-
-Set the `TTS_ENGINE` variable in `.env` to select the voice synthesis engine.
-
-| | OmniVoice (Default) | VoxCPM2 | Kokoro-FastAPI |
-|---|---|---|---|
-| Languages | 600+ | 30 | English to Japanese only |
-| Output sample rate | 24kHz | 48kHz | API output converted to project FLAC |
-| Model size | Small | 2B parameters | Kokoro-82M |
-| Cloning mode | Voice cloning | Ultimate Cloning (ref audio + transcript) | No cloning, speed-priority fixed voice |
-| Speaker identification | Used for references | Used for references | Skipped |
-| Duration control | Supported (target duration) | Not directly supported (natural length) | Natural length |
-| VRAM usage | Low | ~8GB | Low |
-| Setup | `TTS_ENGINE=omnivoice` | `TTS_ENGINE=voxcpm2` | `TTS_ENGINE=kokoro-fastapi` |
-
-### Kokoro-FastAPI Mode
-
-Kokoro-FastAPI runs as a local OpenAI-compatible TTS API server. This project reuses a running server at `KOKORO_FASTAPI_BASE_URL`, or starts the Direct Run checkout in `KOKORO_FASTAPI_DIR` via `uv`.
+For Kokoro-FastAPI TTS, clone the server checkout at the configured path:
 
 ```bash
 git clone https://github.com/remsky/Kokoro-FastAPI.git
@@ -159,46 +81,129 @@ cd Kokoro-FastAPI
 uv run python -m unidic download
 ```
 
-Use `TTS_ENGINE=kokoro-fastapi`, `INPUT_LANG=en` or `auto`, and `OUTPUT_LANG=ja`. The Japanese voice is fixed to `jf_alpha` by default.
+The default `KOKORO_FASTAPI_DIR=./Kokoro-FastAPI` expects that checkout inside this repository root.
 
----
+## Usage
 
-## Language Settings
+Put supported videos in `VIDEO_FOLDER` and run:
 
-### INPUT_LANG
+```bash
+uv run xlanguage-dubbing
+```
 
-Specifies the audio language of the original video. When set to `auto`, the ASR engine will automatically detect it. VibeVoice-ASR supports code-switching, so it can handle multiple languages mixed within a single video without any issues.
+Supported input extensions are `.mp4`, `.mkv`, `.mov`, `.webm`, and `.m4v`.
 
-### OUTPUT_LANG
+If `VIDEO_FOLDER` has no videos, the CLI asks for a direct video file path.
 
-Explicitly specifies the audio language of the output dubbed video. Use ISO 639-1 codes (`en`, `ja`, `fr`, `de`, `zh`, `ko`, etc.).
+To generate a helper server script:
 
-### Automatic Translation Engine Selection
+```bash
+uv run xlanguage-dubbing --generate-script
+```
 
-The optimal translation engine is automatically selected based on the input-output language combination.
+## Configuration
 
-| Language Pair | Engine Used | Notes |
+All runtime settings are read from `.env`. See [.env.example](.env.example) for the full list.
+
+| Setting | Purpose |
+|---|---|
+| `VIDEO_FOLDER` | Folder scanned for source videos. |
+| `TEMP_ROOT` | Checkpoint and intermediate output directory. |
+| `OUTPUT_SUFFIX` | Suffix added to generated videos. |
+| `INPUT_LANG` | Source audio language, or `auto`. |
+| `OUTPUT_LANG` | Dubbed output language. |
+| `ASR_ENGINE` | `vibevoice` or `whisper`. |
+| `ENABLE_AUDIO_SEPARATION` | Use Demucs `vocals` / `no_vocals` stems when `true`. |
+| `TTS_ENGINE` | `omnivoice`, `voxcpm2`, or `kokoro-fastapi`. |
+| `HF_AUTH_TOKEN` | Hugging Face token used by gated or authenticated model downloads. |
+| `ORIGINAL_VOLUME` | Original-audio volume only when audio separation is disabled. |
+| `DUBBED_VOLUME` | Dubbed voice volume in the final mix. |
+
+When `ENABLE_AUDIO_SEPARATION=true`, Demucs writes separated stems and the final mix uses the separated background at full volume. When it is `false`, the pipeline uses the original media audio for ASR, reference extraction, and final background mixing.
+
+## Engine Notes
+
+### ASR
+
+| Engine | Use when | Notes |
 |---|---|---|
-| English → Japanese | CAT-Translate-7b | Japanese-English specialized, high precision |
-| Japanese → English | CAT-Translate-7b | Japanese-English specialized, high precision |
-| All others | TranslateGemma-12b-it | Supports 55 languages |
+| `vibevoice` | You want multilingual or code-switched ASR. | Default mode. Uses MLX models on Apple Silicon. |
+| `whisper` | You want faster single-language ASR. | Requires `scripts/setup_whisper.sh` and whisper.cpp assets. |
 
----
+### TTS
 
-## Configuration Options
+| Engine | Use when | Notes |
+|---|---|---|
+| `omnivoice` | You want the default voice-cloning path. | Uses speaker reference audio. |
+| `voxcpm2` | You want VoxCPM2 Ultimate Cloning behavior. | Uses reference audio plus transcript context. |
+| `kokoro-fastapi` | You want fast English to Japanese dubbing. | Fixed Japanese voice, no cloning, skips speaker identification. |
 
-All settings are managed in the `.env` file. Refer to `.env.example` for details.
+Kokoro-FastAPI mode is intentionally limited to `INPUT_LANG=auto` or English and `OUTPUT_LANG=ja`. The default voice is `jf_alpha`.
 
----
+### Translation
 
-## Resume Functionality
+| Language pair | Engine |
+|---|---|
+| English to Japanese | CAT-Translate |
+| Japanese to English | CAT-Translate |
+| Other pairs | TranslateGemma |
 
-Processing saves checkpoints at each step, so if it stops midway, you can resume from where it left off by re-running `uv run xlanguage-dubbing`.
+## Resume and Outputs
 
-**To start over from the beginning**: Delete the `temp/<video_name>/` folder and re-run.
+The pipeline saves checkpoints under `TEMP_ROOT`, so rerunning the command resumes completed work where possible.
+
+Temporary directories are separated by audio mode:
+
+- `temp/<video>` when Demucs separation is enabled.
+- `temp/<video>_rawaudio` when separation is disabled.
+
+To force a full rerun for one video, remove that video's temporary directory.
+
+## Troubleshooting
+
+### `demucs` is missing
+
+Run:
+
+```bash
+uv sync
+```
+
+If the environment was created before Demucs was added to the project dependencies, resyncing refreshes it.
+
+### Kokoro-FastAPI exits during startup
+
+Use the local checkout expected by `KOKORO_FASTAPI_DIR`, then make sure UniDic has been prepared:
+
+```bash
+cd Kokoro-FastAPI
+uv run python -m unidic download
+```
+
+This project starts Kokoro-FastAPI without inheriting the parent `.venv`, sets Japanese warmup defaults for `jf_alpha`, and sends `lang_code=j` for Japanese speech requests. The local Kokoro-FastAPI checkout also avoids routing Japanese chunk sizing through the English eSpeak phonemizer.
+
+### Whisper mode cannot find whisper.cpp
+
+Run:
+
+```bash
+./scripts/setup_whisper.sh
+```
+
+Then confirm `WHISPER_CPP_DIR=./whisper.cpp` in `.env`.
+
+## Development
+
+Run a syntax check for the package:
+
+```bash
+uv run python -m compileall src
+```
+
+There is no repository test suite configured yet. For functional verification, run `uv run xlanguage-dubbing` on a short video sample after changing pipeline, ASR, translation, TTS, or FFmpeg behavior.
 
 ## License
 
-MIT License
+MIT License. See [LICENSE](LICENSE).
 
-External models and libraries used by this tool have their own respective licenses.
+External models, model weights, and third-party tools keep their own licenses and usage terms.

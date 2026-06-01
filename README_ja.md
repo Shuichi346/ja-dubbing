@@ -1,157 +1,79 @@
 <table>
   <thead>
     <tr>
-      <th style="text-align:center"><a href="README.md">English</a></th>
       <th style="text-align:center"><a href="README_ja.md">日本語</a></th>
+      <th style="text-align:center"><a href="README.md">English</a></th>
     </tr>
   </thead>
 </table>
 
-<p align="center">
-  <h1 align="center">xlanguage-dubbing</h1>
-  <p align="center">多言語動画を他の言語の吹き替え動画に変換するツール。<br>高精度音声クローニングを使用して、元話者の声を再現した吹き替えを作成します。</p>
-</p>
+# xlanguage-dubbing
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-9.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-</p>
+![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
 
----
+`xlanguage-dubbing` は、動画を別の言語に吹き替えた動画へ変換するツールです。音声を抽出し、文字起こしをローカルで翻訳し、複数のTTSエンジンのいずれかを使用して吹き替え音声を生成し、生成した音声に合わせて動画のタイミングを調整し、吹き替えた音声をオリジナル音声またはDemucsで分離した背景トラックと合成します。
 
-## このツールでできること
-
-- 多言語動画を入力し、他の言語の吹き替え動画を出力
-- 高精度音声クローニングを使用して、元話者の声を模倣した吹き替えを作成
-- Demucsで人声と背景音を分離し、ASR/TTSは人声だけを処理してから背景音と再合成
-- 2つのTTSエンジンから選択：OmniVoiceまたはVoxCPM2（30言語、48kHz、Ultimate Cloning）
-- 日本語-英語および英語-日本語翻訳には高精度なCAT-Translate-7bを、その他の言語ペアには55言語対応のTranslateGemma-12b-itを自動選択
-- 自然な吹き替えのための動画速度自動調整
-- 処理が中断されても途中から再開可能
-
-### デモ動画
-
-<a href="https://www.youtube.com/watch?v=amYVIorgOQQ">
-  <img src="https://img.youtube.com/vi/amYVIorgOQQ/0.jpg" width="250" alt="Video Title">
-</a>
-
----
+このプロジェクトはApple Siliconのローカル環境向けに構築されており、現在はMPS/CPU推論を使用したmacOSでテストされています。
 
 ## 目次
 
-- [システム要件](#system-requirements)
-- [セットアップ](#setup)
-- [使用方法](#usage)
-- [ASRエンジン選択](#asr-engines)
-- [TTSエンジン選択](#tts-engines)
-- [言語設定](#language-settings)
-- [設定オプション](#configuration-options)
-- [ライセンス](#license)
+- [機能](#機能)
+- [動作環境](#動作環境)
+- [インストール](#インストール)
+- [使い方](#使い方)
+- [設定](#設定)
+- [エンジンについて](#エンジンについて)
+- [再開と出力ファイル](#再開と出力ファイル)
+- [トラブルシューティング](#トラブルシューティング)
+- [開発](#開発)
+- [ライセンス](#ライセンス)
 
----
+## 機能
 
-## システム要件
+- 設定フォルダ内の動画をバッチ処理、またはフォルダが空の場合は単一ファイルをプロンプトで指定可能。
+- VibeVoice-ASRによる多言語ASRをサポートし、whisper.cppモードもオプションで利用可能。
+- 英語/日本語の組み合わせにはCAT-Translateを、その他の言語ペアにはTranslateGemmaを使用。
+- 3つのTTSモードを提供:
+  - `omnivoice`: デフォルトの音声クローニングエンジン。
+  - `voxcpm2`: リファレンス音声と文字起こしを使用した30言語対応のVoxCPM2音声クローニング。
+  - `kokoro-fastapi`: Kokoro-FastAPIを使用した、英語から日本語への高速固定音声モード。
+- ASRおよびTTSリファレンス抽出前のオプションのDemucs音声/背景分離。
+- 中断したジョブを再開できる動画ごとのチェックポイント機能。
+- セグメントレベルのタイミング調整とFFmpegによる最終的な音声/映像のマルチプレクシング。
 
-- **Mac (Apple Silicon)** — Mac mini M4 (24GB)でテスト済み
-- **Python 3.13以上**
-- Linuxは未テスト
+## 動作環境
 
----
-
-## セットアップ
-
-### 1. 必要なツールのインストール
+- Apple Silicon搭載のmacOS。
+- Python 3.13以上。
+- Homebrewパッケージ:
 
 ```bash
 brew install ffmpeg cmake uv
 ```
 
-### 2. リポジトリのダウンロード
+LinuxおよびCUDAを使用したワークフローは、このリポジトリの構成ではサポートされていません。
+
+## インストール
 
 ```bash
 git clone https://github.com/Shuichi346/xlanguage-dubbing.git
 cd xlanguage-dubbing
-```
-
-### 3. 依存関係のインストール
-
-```bash
 uv sync
-uv pip install demucs
-uv run python -m spacy download en_core_web_sm
-```
-
-### 4. 設定ファイルの作成
-
-```bash
 cp .env.example .env
 ```
 
-`.env`を編集して以下を設定：
+実行前に `.env` を編集してください。最低限、`VIDEO_FOLDER`、`INPUT_LANG`、`OUTPUT_LANG`、`ASR_ENGINE`、`TTS_ENGINE` をジョブに合わせて設定してください。
 
-| 項目 | 説明 | 例 |
-|------|-------------|---------|
-| `VIDEO_FOLDER` | 吹き替えする動画が入っているフォルダ | `./input_videos` |
-| `INPUT_LANG` | 元動画の音声言語（`auto`で自動検出） | `auto`, `en`, `ja` |
-| `OUTPUT_LANG` | 出力する吹き替え言語 | `ja`, `en`, `fr` |
-| `ASR_ENGINE` | 音声認識エンジン | `vibevoice`（推奨）, `whisper` |
-| `ENABLE_AUDIO_SEPARATION` | Demucsで人声/背景音分離を使用するか | `true` |
-| `DEMUCS_MODEL` | 人声/背景音の分離モデル | `htdemucs_ft` |
-| `TTS_ENGINE` | 音声合成エンジン | `omnivoice`（デフォルト）, `voxcpm2`, `kokoro-fastapi` |
-| `HF_AUTH_TOKEN` | HuggingFaceトークン（whisper使用時のみ） | `hf_xxxxxxxxxxxx` |
-
-### 5. ASRエンジンのセットアップ
-
-#### VibeVoiceモード（デフォルト/推奨）
-
-追加セットアップは不要。初回実行時にモデルが自動ダウンロードされます。
-
-#### Whisperモード
+whisper.cpp ASRを使用する場合は、オプションのセットアップスクリプトを実行してください:
 
 ```bash
 chmod +x scripts/setup_whisper.sh
 ./scripts/setup_whisper.sh
 ```
 
-### 6. 実行
-
-```bash
-uv run xlanguage-dubbing
-```
-
----
-
-## ASRエンジン選択
-
-| | VibeVoice（推奨） | Whisper |
-|---|---|---|
-| 速度 | 遅い | 速い |
-| 多言語混合（コードスイッチング） | 対応 | 非対応（単一言語のみ） |
-| 追加セットアップ | 不要 | `setup_whisper.sh`の実行が必要 |
-| HuggingFaceトークン | 不要 | 必要 |
-
----
-
-## TTSエンジン選択
-
-`.env`の`TTS_ENGINE`変数を設定して音声合成エンジンを選択します。
-
-| | OmniVoice（デフォルト） | VoxCPM2 | Kokoro-FastAPI |
-|---|---|---|---|
-| 言語 | 600+ | 30 | 英語→日本語のみ |
-| 出力サンプルレート | 24kHz | 48kHz | API出力をプロジェクト標準FLACへ変換 |
-| モデルサイズ | 小 | 2Bパラメータ | Kokoro-82M |
-| クローニングモード | 音声クローニング | Ultimate Cloning（参照音声＋転写） | 非クローン・速度優先固定ボイス |
-| 話者識別 | 参照音声生成に使用 | 参照音声生成に使用 | スキップ |
-| 長さ制御 | 対応（目標時間） | 直接対応なし（自然な長さ） | 自然な長さ |
-| VRAM使用量 | 少 | ~8GB | 少 |
-| 設定 | `TTS_ENGINE=omnivoice` | `TTS_ENGINE=voxcpm2` | `TTS_ENGINE=kokoro-fastapi` |
-
-### Kokoro-FastAPIモード
-
-Kokoro-FastAPIはローカルのOpenAI互換TTS APIサーバーとして動作します。このプロジェクトは`KOKORO_FASTAPI_BASE_URL`の既存サーバーを再利用し、起動していない場合は`KOKORO_FASTAPI_DIR`のDirect Run環境を`uv`で起動します。
+Kokoro-FastAPI TTSを使用する場合は、設定されたパスにサーバーのチェックアウトをクローンしてください:
 
 ```bash
 git clone https://github.com/remsky/Kokoro-FastAPI.git
@@ -159,46 +81,129 @@ cd Kokoro-FastAPI
 uv run python -m unidic download
 ```
 
-`TTS_ENGINE=kokoro-fastapi`、`INPUT_LANG=en`または`auto`、`OUTPUT_LANG=ja`で使用してください。日本語音声のvoiceはデフォルトで`jf_alpha`です。
+デフォルトの `KOKORO_FASTAPI_DIR=./Kokoro-FastAPI` は、このリポジトリのルート内にそのチェックアウトがあることを想定しています。
 
----
+## 使い方
 
-## 言語設定
+対応動画を `VIDEO_FOLDER` に配置して実行してください:
 
-### INPUT_LANG
+```bash
+uv run xlanguage-dubbing
+```
 
-元動画の音声言語を指定します。`auto`に設定すると、ASRエンジンが自動検出します。VibeVoice-ASRはコードスイッチングに対応しているため、単一動画内で複数言語が混在していても問題なく処理できます。
+対応する入力拡張子は `.mp4`、`.mkv`、`.mov`、`.webm`、`.m4v` です。
 
-### OUTPUT_LANG
+`VIDEO_FOLDER` に動画がない場合、CLIは直接動画ファイルのパスを尋ねます。
 
-出力する吹き替え動画の音声言語を明示的に指定します。ISO 639-1コード（`en`, `ja`, `fr`, `de`, `zh`, `ko`など）を使用してください。
+ヘルパーサーバースクリプトを生成する場合:
 
-### 自動翻訳エンジン選択
+```bash
+uv run xlanguage-dubbing --generate-script
+```
 
-入出力言語の組み合わせに基づいて、最適な翻訳エンジンが自動選択されます。
+## 設定
 
-| 言語ペア | 使用エンジン | 備考 |
+すべての実行時設定は `.env` から読み込まれます。完全なリストは [.env.example](.env.example) を参照してください。
+
+| 設定項目 | 用途 |
+|---|---|
+| `VIDEO_FOLDER` | ソース動画をスキャンするフォルダ。 |
+| `TEMP_ROOT` | チェックポイントおよび中間出力ディレクトリ。 |
+| `OUTPUT_SUFFIX` | 生成された動画に追加されるサフィックス。 |
+| `INPUT_LANG` | ソース音声の言語、または `auto`。 |
+| `OUTPUT_LANG` | 吹き替え後の出力言語。 |
+| `ASR_ENGINE` | `vibevoice` または `whisper`。 |
+| `ENABLE_AUDIO_SEPARATION` | `true` の場合、Demucsの `vocals` / `no_vocals` ステムを使用。 |
+| `TTS_ENGINE` | `omnivoice`、`voxcpm2`、または `kokoro-fastapi`。 |
+| `HF_AUTH_TOKEN` | ゲートまたは認証が必要なモデルのダウンロードに使用するHugging Faceトークン。 |
+| `ORIGINAL_VOLUME` | 音声分離が無効の場合のオリジナル音声の音量。 |
+| `DUBBED_VOLUME` | 最終ミックスにおける吹き替え音声の音量。 |
+
+`ENABLE_AUDIO_SEPARATION=true` の場合、Demucsは分離したステムを書き出し、最終ミックスでは分離した背景音をフルボリュームで使用します。`false` の場合、パイプラインはASR・リファレンス抽出・最終背景ミックスにオリジナルのメディア音声を使用します。
+
+## エンジンについて
+
+### ASR
+
+| エンジン | 推奨ケース | 備考 |
 |---|---|---|
-| 英語 → 日本語 | CAT-Translate-7b | 日英専門、高精度 |
-| 日本語 → 英語 | CAT-Translate-7b | 日英専門、高精度 |
-| その他すべて | TranslateGemma-12b-it | 55言語対応 |
+| `vibevoice` | 多言語またはコードスイッチングASRを使用したい場合。 | デフォルトモード。Apple SiliconのMLXモデルを使用。 |
+| `whisper` | より高速な単一言語ASRを使用したい場合。 | `scripts/setup_whisper.sh` およびwhisper.cppアセットが必要。 |
 
----
+### TTS
 
-## 設定オプション
+| エンジン | 推奨ケース | 備考 |
+|---|---|---|
+| `omnivoice` | デフォルトの音声クローニングパスを使用したい場合。 | スピーカーリファレンス音声を使用。 |
+| `voxcpm2` | VoxCPM2 Ultimate Cloningの動作を使用したい場合。 | リファレンス音声に加えて文字起こしコンテキストを使用。 |
+| `kokoro-fastapi` | 高速な英語から日本語への吹き替えを使用したい場合。 | 固定日本語音声、クローニングなし、話者識別をスキップ。 |
 
-すべての設定は`.env`ファイルで管理されています。詳細は`.env.example`を参照してください。
+Kokoro-FastAPIモードは意図的に `INPUT_LANG=auto` または英語、`OUTPUT_LANG=ja` に限定されています。デフォルト音声は `jf_alpha` です。
 
----
+### 翻訳
 
-## 再開機能
+| 言語ペア | エンジン |
+|---|---|
+| 英語から日本語 | CAT-Translate |
+| 日本語から英語 | CAT-Translate |
+| その他のペア | TranslateGemma |
 
-処理は各ステップでチェックポイントを保存するため、途中で停止しても`uv run xlanguage-dubbing`を再実行することで途中から再開できます。
+## 再開と出力ファイル
 
-**最初からやり直したい場合**：`temp/<動画名>/`フォルダを削除して再実行してください。
+パイプラインは `TEMP_ROOT` 配下にチェックポイントを保存するため、コマンドを再実行すると可能な限り完了済みの作業から再開されます。
+
+一時ディレクトリは音声モードごとに分けられます:
+
+- Demucs分離が有効の場合: `temp/<video>`
+- 分離が無効の場合: `temp/<video>_rawaudio`
+
+特定の動画を強制的に最初から再実行するには、その動画の一時ディレクトリを削除してください。
+
+## トラブルシューティング
+
+### `demucs` が見つからない
+
+以下を実行してください:
+
+```bash
+uv sync
+```
+
+DemucsがプロジェクトのDependenciesに追加される前に環境が作成されていた場合、再同期することで更新されます。
+
+### Kokoro-FastAPIが起動中に終了する
+
+`KOKORO_FASTAPI_DIR` で指定されたローカルチェックアウトを使用し、UniDicが準備されていることを確認してください:
+
+```bash
+cd Kokoro-FastAPI
+uv run python -m unidic download
+```
+
+このプロジェクトは親の `.venv` を継承せずにKokoro-FastAPIを起動し、`jf_alpha` の日本語ウォームアップデフォルトを設定し、日本語音声リクエストには `lang_code=j` を送信します。また、ローカルのKokoro-FastAPIチェックアウトを使用することで、日本語のチャンクサイジングが英語のeSpeak音素変換器を経由しないようにします。
+
+### WhisperモードでWhisper.cppが見つからない
+
+以下を実行してください:
+
+```bash
+./scripts/setup_whisper.sh
+```
+
+その後、`.env` の `WHISPER_CPP_DIR=./whisper.cpp` を確認してください。
+
+## 開発
+
+パッケージの構文チェックを実行するには:
+
+```bash
+uv run python -m compileall src
+```
+
+リポジトリのテストスイートはまだ設定されていません。機能検証には、パイプライン、ASR、翻訳、TTS、またはFFmpegの動作を変更した後に、短い動画サンプルで `uv run xlanguage-dubbing` を実行してください。
 
 ## ライセンス
 
-MIT License
+MITライセンス。[LICENSE](LICENSE) を参照してください。
 
-このツールで使用される外部モデルやライブラリは、それぞれのライセンスに従います。
+外部モデル、モデルの重み、およびサードパーティツールは、それぞれ独自のライセンスおよび使用条件に従います。

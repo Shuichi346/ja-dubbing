@@ -122,6 +122,51 @@ def _select_start_command() -> list[str]:
     )
 
 
+def _find_espeak_data_dir() -> Optional[Path]:
+    """Kokoro-FastAPI の実行環境で使える eSpeak-NG data ディレクトリを探す。"""
+    configured = (
+        os.environ.get("ESPEAK_DATA_PATH")
+        or os.environ.get("PHONEMIZER_ESPEAK_DATA")
+    )
+    if configured:
+        path = Path(configured).expanduser()
+        if (path / "phontab").exists():
+            return path.resolve()
+
+    for venv_dir in sorted(KOKORO_FASTAPI_DIR.glob(".venv/lib/python*/site-packages")):
+        path = venv_dir / "espeakng_loader" / "espeak-ng-data"
+        if (path / "phontab").exists():
+            return path.resolve()
+
+    for candidate in (
+        Path("/opt/homebrew/share/espeak-ng-data"),
+        Path("/usr/local/share/espeak-ng-data"),
+        Path("/usr/share/espeak-ng-data"),
+    ):
+        if (candidate / "phontab").exists():
+            return candidate.resolve()
+
+    return None
+
+
+def _kokoro_server_env() -> dict[str, str]:
+    """親プロセスの仮想環境を引き継がずに Kokoro-FastAPI 用 env を作る。"""
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    env.setdefault("DEFAULT_VOICE", KOKORO_FASTAPI_VOICE)
+    if KOKORO_FASTAPI_VOICE:
+        env.setdefault("DEFAULT_VOICE_CODE", KOKORO_FASTAPI_VOICE[0].lower())
+
+    espeak_data_dir = _find_espeak_data_dir()
+    if espeak_data_dir is not None:
+        data_path = str(espeak_data_dir)
+        env.setdefault("ESPEAK_DATA_PATH", data_path)
+        env.setdefault("PHONEMIZER_ESPEAK_DATA", data_path)
+
+    return env
+
+
 def _run_unidic_download_if_needed() -> None:
     """日本語 voice 用の UniDic 辞書を Kokoro-FastAPI 環境に用意する。"""
     if not KOKORO_FASTAPI_DOWNLOAD_UNIDIC:
@@ -219,15 +264,13 @@ def ensure_kokoro_fastapi_server() -> None:
     )
     _SERVER_LOG_FILE.flush()
 
-    env = os.environ.copy()
-    env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     _SERVER_PROCESS = subprocess.Popen(
         cmd,
         cwd=KOKORO_FASTAPI_DIR,
         stdout=_SERVER_LOG_FILE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=env,
+        env=_kokoro_server_env(),
     )
 
     deadline = time.time() + KOKORO_FASTAPI_START_TIMEOUT_SEC
@@ -266,6 +309,7 @@ def kokoro_fastapi_synthesize(text: str, out_audio: Path) -> None:
         "model": KOKORO_FASTAPI_MODEL,
         "input": text,
         "voice": KOKORO_FASTAPI_VOICE,
+        "lang_code": KOKORO_FASTAPI_VOICE[:1].lower(),
         "response_format": KOKORO_FASTAPI_RESPONSE_FORMAT,
         "speed": KOKORO_FASTAPI_SPEED,
     }
